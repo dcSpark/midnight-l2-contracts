@@ -1,0 +1,27 @@
+ {
+    "restoreTerminals.terminals":
+    [
+        {
+            "splitTerminals": [{
+                "name": "root"
+            }]
+        },
+        {
+            "splitTerminals": [{
+                "name": "contract",
+                "commands": ["cd contract"]
+            }]
+        },
+        {
+            "splitTerminals": [{
+                "name": "cli",
+                "commands": ["cd counter-cli"]
+            }]
+        },
+        {
+            "splitTerminals": [{
+                "name": "infra"
+            }]
+        }
+    ]
+}
