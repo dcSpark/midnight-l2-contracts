@@ -15,13 +15,15 @@
 
 import { type Resource } from '@midnight-ntwrk/wallet';
 import { type Wallet } from '@midnight-ntwrk/wallet-api';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface, type Interface } from 'node:readline/promises';
 import { type Logger } from 'pino';
-import { type StartedDockerComposeEnvironment, type DockerComposeEnvironment } from 'testcontainers';
+import { type DockerComposeEnvironment, type StartedDockerComposeEnvironment } from 'testcontainers';
+import * as api from './api';
 import { type CounterProviders, type DeployedCounterContract } from './common-types';
 import { type Config, StandaloneConfig } from './config';
-import * as api from './api';
 
 let logger: Logger;
 
@@ -46,7 +48,28 @@ You can do one of the following:
 Which would you like to do? `;
 
 const join = async (providers: CounterProviders, rli: Interface): Promise<DeployedCounterContract> => {
-  const contractAddress = await rli.question('What is the contract address (in hex)? ');
+  let contractAddress: string | undefined;
+  const deploymentPath = path.resolve(process.cwd(), 'deployment.json');
+  try {
+    const data = await fs.readFile(deploymentPath, 'utf-8');
+    const parsed: unknown = JSON.parse(data);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'contractAddress' in parsed &&
+      typeof (parsed as { contractAddress?: unknown }).contractAddress === 'string'
+    ) {
+      contractAddress = (parsed as { contractAddress: string }).contractAddress;
+      logger.info(`Using contract address from deployment.json: ${contractAddress}`);
+    } else {
+      logger.warn('deployment.json found but contractAddress field is missing or invalid.');
+    }
+  } catch (err) {
+    logger.warn(`Could not read deployment.json: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!contractAddress) {
+    contractAddress = await rli.question('What is the contract address (in hex)? ');
+  }
   return await api.joinContract(providers, contractAddress);
 };
 

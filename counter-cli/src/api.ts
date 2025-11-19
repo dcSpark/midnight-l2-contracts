@@ -21,6 +21,8 @@ import { type CoinInfo, nativeToken, Transaction, type TransactionId } from '@mi
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
+import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
+import { getLedgerNetworkId, getZswapNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import {
   type BalancedTransaction,
@@ -30,10 +32,13 @@ import {
   type UnbalancedTransaction,
   type WalletProvider,
 } from '@midnight-ntwrk/midnight-js-types';
+import { assertIsContractAddress, toHex } from '@midnight-ntwrk/midnight-js-utils';
 import { type Resource, WalletBuilder } from '@midnight-ntwrk/wallet';
 import { type Wallet } from '@midnight-ntwrk/wallet-api';
 import { Transaction as ZswapTransaction } from '@midnight-ntwrk/zswap';
 import { webcrypto } from 'crypto';
+import * as fs from 'node:fs';
+import * as fsAsync from 'node:fs/promises';
 import { type Logger } from 'pino';
 import * as Rx from 'rxjs';
 import { WebSocket } from 'ws';
@@ -44,11 +49,6 @@ import {
   type DeployedCounterContract,
 } from './common-types';
 import { type Config, contractConfig } from './config';
-import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
-import { assertIsContractAddress, toHex } from '@midnight-ntwrk/midnight-js-utils';
-import { getLedgerNetworkId, getZswapNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
-import * as fsAsync from 'node:fs/promises';
-import * as fs from 'node:fs';
 
 let logger: Logger;
 // Instead of setting globalThis.crypto which is read-only, we'll ensure crypto is available
@@ -96,6 +96,10 @@ export const deploy = async (
     initialPrivateState: privateState,
   });
   logger.info(`Deployed contract at address: ${counterContract.deployTxData.public.contractAddress}`);
+  fs.writeFileSync(
+    'deployment.json',
+    JSON.stringify({ contractAddress: counterContract.deployTxData.public.contractAddress }),
+  );
   return counterContract;
 };
 
