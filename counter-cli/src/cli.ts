@@ -114,7 +114,12 @@ const mainLoop = async (providers: CounterProviders, rli: Interface): Promise<vo
 };
 
 const buildWalletFromSeed = async (config: Config, rli: Interface): Promise<Wallet & Resource> => {
-  const seed = await rli.question('Enter your wallet seed: ');
+  let seed = process.env.WALLET_SEED;
+  if (!seed) {
+    seed = await rli.question('Enter your wallet seed: ');
+  } else {
+    logger.info('Using wallet seed from WALLET_SEED environment variable.');
+  }
   return await api.buildWalletAndWaitForFunds(config, seed, '');
 };
 
