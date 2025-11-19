@@ -103,9 +103,19 @@ export const deploy = async (
   return counterContract;
 };
 
-export const increment = async (counterContract: DeployedCounterContract): Promise<FinalizedTxData> => {
+import { type Interface } from 'node:readline/promises';
+
+export const increment = async (counterContract: DeployedCounterContract, rli: Interface): Promise<FinalizedTxData> => {
   logger.info('Incrementing...');
-  const finalizedTxData = await counterContract.callTx.increment();
+  let valueStr = await rli.question('Enter value to increment (integer): ');
+  let value: bigint;
+  try {
+    value = BigInt(valueStr);
+  } catch {
+    logger.error('Invalid input, using default value 1.');
+    value = 1n;
+  }
+  const finalizedTxData = await counterContract.callTx.increment(value);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
 };

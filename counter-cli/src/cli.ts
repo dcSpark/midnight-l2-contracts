@@ -99,7 +99,7 @@ const mainLoop = async (providers: CounterProviders, rli: Interface): Promise<vo
     const choice = await rli.question(MAIN_LOOP_QUESTION);
     switch (choice) {
       case '1':
-        await api.increment(counterContract);
+        await api.increment(counterContract, rli);
         break;
       case '2':
         await api.displayCounterValue(providers, counterContract);

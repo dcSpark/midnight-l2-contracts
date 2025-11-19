@@ -21,6 +21,6 @@ import CompactStandardLibrary;
 export ledger round: Counter;
 
 // transition function changing public state
-export circuit increment(): [] {
-  round.increment(1);
+export circuit increment(val: Uint<0..10>): [] {
+  round.increment(disclose(val));
 }
