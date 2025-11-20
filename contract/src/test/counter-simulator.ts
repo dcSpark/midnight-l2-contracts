@@ -60,9 +60,9 @@ export class CounterSimulator {
     return this.circuitContext.currentPrivateState;
   }
 
-  public increment(val: bigint): Ledger {
+  public updateStateRoot(val: Uint8Array): Ledger {
     // Update the current context to be the result of executing the circuit.
-    this.circuitContext = this.contract.impureCircuits.increment(
+    this.circuitContext = this.contract.impureCircuits.updateStateRoot(
       this.circuitContext,
       val
     ).context;

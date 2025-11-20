@@ -16,12 +16,12 @@
 import { type Resource } from '@midnight-ntwrk/wallet';
 import { type Wallet } from '@midnight-ntwrk/wallet-api';
 import path from 'path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as api from '../api';
 import { type CounterProviders } from '../common-types';
 import { currentDir } from '../config';
 import { createLogger } from '../logger-utils';
 import { TestEnvironment } from './commons';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 const logDir = path.resolve(currentDir, '..', 'logs', 'tests', `${new Date().toISOString()}.log`);
 const logger = await createLogger(logDir);
@@ -51,16 +51,16 @@ describe('API', () => {
     const counterContract = await api.deploy(providers, { privateCounter: 0 });
     expect(counterContract).not.toBeNull();
 
-    const counter = await api.displayCounterValue(providers, counterContract);
-    expect(counter.counterValue).toEqual(BigInt(0));
+    const counter = await api.displayStateRoot(providers, counterContract);
+    expect(counter.stateRoot).toEqual(BigInt(0));
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    const response = await api.increment(counterContract);
+    const response = await api.updateStateRoot(counterContract);
     expect(response.txHash).toMatch(/[0-9a-f]{64}/);
     expect(response.blockHeight).toBeGreaterThan(BigInt(0));
 
-    const counterAfter = await api.displayCounterValue(providers, counterContract);
-    expect(counterAfter.counterValue).toEqual(BigInt(1));
+    const counterAfter = await api.displayStateRoot(providers, counterContract);
+    expect(counterAfter.stateRoot).toEqual(BigInt(1));
     expect(counterAfter.contractAddress).toEqual(counter.contractAddress);
   });
 });

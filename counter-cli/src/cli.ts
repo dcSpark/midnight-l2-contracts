@@ -42,8 +42,8 @@ Which would you like to do? `;
 
 const MAIN_LOOP_QUESTION = `
 You can do one of the following:
-  1. Increment
-  2. Display current counter value
+  1. Update state root
+  2. Display current state root value
   3. Exit
 Which would you like to do? `;
 
@@ -99,10 +99,10 @@ const mainLoop = async (providers: CounterProviders, rli: Interface): Promise<vo
     const choice = await rli.question(MAIN_LOOP_QUESTION);
     switch (choice) {
       case '1':
-        await api.increment(counterContract, rli);
+        await api.updateStateRoot(counterContract, rli);
         break;
       case '2':
-        await api.displayCounterValue(providers, counterContract);
+        await api.displayStateRoot(providers, counterContract);
         break;
       case '3':
         logger.info('Exiting...');

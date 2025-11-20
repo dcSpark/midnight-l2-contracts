@@ -59,12 +59,12 @@ globalThis.WebSocket = WebSocket;
 export const getCounterLedgerState = async (
   providers: CounterProviders,
   contractAddress: ContractAddress,
-): Promise<bigint | null> => {
+): Promise<Uint8Array | null> => {
   assertIsContractAddress(contractAddress);
   logger.info('Checking contract ledger state...');
   const state = await providers.publicDataProvider
     .queryContractState(contractAddress)
-    .then((contractState) => (contractState != null ? Counter.ledger(contractState.data).round : null));
+    .then((contractState) => (contractState != null ? Counter.ledger(contractState.data).stateRoot : null));
   logger.info(`Ledger state: ${state}`);
   return state;
 };
@@ -105,33 +105,41 @@ export const deploy = async (
 
 import { type Interface } from 'node:readline/promises';
 
-export const increment = async (counterContract: DeployedCounterContract, rli: Interface): Promise<FinalizedTxData> => {
-  logger.info('Incrementing...');
-  let valueStr = await rli.question('Enter value to increment (integer): ');
-  let value: bigint;
-  try {
-    value = BigInt(valueStr);
-  } catch {
-    logger.error('Invalid input, using default value 1.');
-    value = 1n;
+export const updateStateRoot = async (
+  counterContract: DeployedCounterContract,
+  rli: Interface,
+): Promise<FinalizedTxData> => {
+  logger.info('Updating state root...');
+  let hexStr = await rli.question('Enter new state root (hex string, e.g. 0xabc...): ');
+  if (hexStr.startsWith('0x') || hexStr.startsWith('0X')) {
+    hexStr = hexStr.slice(2);
   }
-  const finalizedTxData = await counterContract.callTx.increment(value);
+  if (hexStr.length > 64) {
+    logger.warn('Input too long, truncating to 32 bytes.');
+    hexStr = hexStr.slice(0, 64);
+  }
+  hexStr = hexStr.padEnd(64, '0');
+  const valueBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    valueBytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
+  }
+  const finalizedTxData = await counterContract.callTx.updateStateRoot(valueBytes);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
 };
 
-export const displayCounterValue = async (
+export const displayStateRoot = async (
   providers: CounterProviders,
   counterContract: DeployedCounterContract,
-): Promise<{ counterValue: bigint | null; contractAddress: string }> => {
+): Promise<{ stateRoot: Uint8Array | null; contractAddress: string }> => {
   const contractAddress = counterContract.deployTxData.public.contractAddress;
-  const counterValue = await getCounterLedgerState(providers, contractAddress);
-  if (counterValue === null) {
+  const stateRootValue = await getCounterLedgerState(providers, contractAddress);
+  if (stateRootValue === null) {
     logger.info(`There is no counter contract deployed at ${contractAddress}.`);
   } else {
-    logger.info(`Current counter value: ${Number(counterValue)}`);
+    logger.info(`Current state root value: ${Number(stateRootValue)}`);
   }
-  return { contractAddress, counterValue };
+  return { contractAddress, stateRoot: stateRootValue };
 };
 
 export const createWalletAndMidnightProvider = async (wallet: Wallet): Promise<WalletProvider & MidnightProvider> => {
@@ -340,7 +348,7 @@ export const configureProviders = async (wallet: Wallet & Resource, config: Conf
       privateStateStoreName: contractConfig.privateStateStoreName,
     }),
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),
-    zkConfigProvider: new NodeZkConfigProvider<'increment'>(contractConfig.zkConfigPath),
+    zkConfigProvider: new NodeZkConfigProvider<'updateStateRoot'>(contractConfig.zkConfigPath),
     proofProvider: httpClientProofProvider(config.proofServer),
     walletProvider: walletAndMidnightProvider,
     midnightProvider: walletAndMidnightProvider,

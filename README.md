@@ -90,13 +90,6 @@ The Compact compiler generates TypeScript bindings and zero-knowledge circuits f
 cd contract && npm run compact
 ```
 
-Expected output:
-
-```
-Compiling 1 circuits:
-  circuit "increment" (k=10, rows=29)
-```
-
 Note: First time may download zero-knowledge parameters (~500MB). This is normal and happens once.
 
 ### Build and Test

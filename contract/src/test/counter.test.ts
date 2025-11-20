@@ -32,15 +32,17 @@ describe("Counter smart contract", () => {
   it("properly initializes ledger state and private state", () => {
     const simulator = new CounterSimulator();
     const initialLedgerState = simulator.getLedger();
-    expect(initialLedgerState.round).toEqual(0n);
+    expect(initialLedgerState.stateRoot).toEqual(new Uint8Array(32));
     const initialPrivateState = simulator.getPrivateState();
     expect(initialPrivateState).toEqual({ privateCounter: 0 });
   });
 
-  it("increments the counter correctly", () => {
+  it("updates the state root correctly", () => {
     const simulator = new CounterSimulator();
-    const nextLedgerState = simulator.increment(7n);
-    expect(nextLedgerState.round).toEqual(7n);
+    const newRoot = new Uint8Array(32);
+    newRoot.set([0x61, 0x62, 0x63]);
+    const nextLedgerState = simulator.updateStateRoot(newRoot);
+    expect(nextLedgerState.stateRoot).toEqual(newRoot);
     const nextPrivateState = simulator.getPrivateState();
     expect(nextPrivateState).toEqual({ privateCounter: 0 });
   });

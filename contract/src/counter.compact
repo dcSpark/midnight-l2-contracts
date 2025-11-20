@@ -18,9 +18,9 @@ pragma language_version >= 0.16 && <= 0.18;
 import CompactStandardLibrary;
 
 // public state
-export ledger round: Counter;
+export ledger stateRoot: Bytes<32>;
 
 // transition function changing public state
-export circuit increment(val: Uint<0..10>): [] {
-  round.increment(disclose(val));
+export circuit updateStateRoot(newRoot: Bytes<32>): [] {
+  stateRoot = disclose(newRoot);
 }
