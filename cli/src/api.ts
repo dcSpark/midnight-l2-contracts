@@ -42,7 +42,7 @@ import * as fsAsync from 'node:fs/promises';
 import { type Logger } from 'pino';
 import * as Rx from 'rxjs';
 import { WebSocket } from 'ws';
-import { L2PrivateStateId, type DeployedL2Contract, type L2Contract, type L2Providers } from './common-types';
+import { type DeployedL2Contract, type L2Contract, L2PrivateStateId, type L2Providers } from './common-types';
 import { type Config, contractConfig } from './config';
 
 let logger: Logger;
@@ -92,24 +92,12 @@ export const deploy = async (providers: L2Providers, privateState: L2PrivateStat
   return l2Contract;
 };
 
-import { type Interface } from 'node:readline/promises';
-
-export const updateStateRoot = async (l2Contract: DeployedL2Contract, rli: Interface): Promise<FinalizedTxData> => {
+export const updateStateRoot = async (
+  l2Contract: DeployedL2Contract,
+  newRoot: Uint8Array,
+): Promise<FinalizedTxData> => {
   logger.info('Updating state root...');
-  let hexStr = await rli.question('Enter new state root (hex string, e.g. 0xabc...): ');
-  if (hexStr.startsWith('0x') || hexStr.startsWith('0X')) {
-    hexStr = hexStr.slice(2);
-  }
-  if (hexStr.length > 64) {
-    logger.warn('Input too long, truncating to 32 bytes.');
-    hexStr = hexStr.slice(0, 64);
-  }
-  hexStr = hexStr.padEnd(64, '0');
-  const valueBytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) {
-    valueBytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
-  }
-  const finalizedTxData = await l2Contract.callTx.updateStateRoot(valueBytes);
+  const finalizedTxData = await l2Contract.callTx.updateStateRoot(newRoot);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
 };

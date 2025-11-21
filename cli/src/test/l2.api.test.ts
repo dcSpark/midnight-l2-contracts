@@ -52,15 +52,17 @@ describe('API', () => {
     expect(l2Contract).not.toBeNull();
 
     const l2 = await api.displayStateRoot(providers, l2Contract);
-    expect(l2.stateRoot).toEqual(BigInt(0));
+    expect(l2.stateRoot).toEqual(new Uint8Array(32));
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    const response = await api.updateStateRoot(l2Contract);
+    const newRoot = new Uint8Array(32);
+    newRoot.set([0x61, 0x62, 0x63]);
+    const response = await api.updateStateRoot(l2Contract, newRoot);
     expect(response.txHash).toMatch(/[0-9a-f]{64}/);
     expect(response.blockHeight).toBeGreaterThan(BigInt(0));
 
-    const counterAfter = await api.displayStateRoot(providers, l2Contract);
-    expect(counterAfter.stateRoot).toEqual(BigInt(1));
-    expect(counterAfter.contractAddress).toEqual(l2.contractAddress);
+    const rootAfter = await api.displayStateRoot(providers, l2Contract);
+    expect(rootAfter.stateRoot).toEqual(newRoot);
+    expect(rootAfter.contractAddress).toEqual(l2.contractAddress);
   });
 });
