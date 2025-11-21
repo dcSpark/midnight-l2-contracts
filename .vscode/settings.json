@@ -15,7 +15,7 @@
         {
             "splitTerminals": [{
                 "name": "cli",
-                "commands": ["cd counter-cli"]
+                "commands": ["cd cli"]
             }]
         },
         {

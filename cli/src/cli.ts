@@ -22,7 +22,7 @@ import { createInterface, type Interface } from 'node:readline/promises';
 import { type Logger } from 'pino';
 import { type DockerComposeEnvironment, type StartedDockerComposeEnvironment } from 'testcontainers';
 import * as api from './api';
-import { type CounterProviders, type DeployedCounterContract } from './common-types';
+import { type DeployedL2Contract, type L2Providers } from './common-types';
 import { type Config, StandaloneConfig } from './config';
 
 let logger: Logger;
@@ -35,19 +35,19 @@ const GENESIS_MINT_WALLET_SEED = '0000000000000000000000000000000000000000000000
 
 const DEPLOY_OR_JOIN_QUESTION = `
 You can do one of the following:
-  1. Deploy a new counter contract
-  2. Join an existing counter contract
+  1. Deploy a new L2 contract
+  2. Join an existing L2 contract
   3. Exit
 Which would you like to do? `;
 
 const MAIN_LOOP_QUESTION = `
 You can do one of the following:
-  1. Increment
-  2. Display current counter value
+  1. Update state root
+  2. Display current state root value
   3. Exit
 Which would you like to do? `;
 
-const join = async (providers: CounterProviders, rli: Interface): Promise<DeployedCounterContract> => {
+const join = async (providers: L2Providers, rli: Interface): Promise<DeployedL2Contract> => {
   let contractAddress: string | undefined;
   const deploymentPath = path.resolve(process.cwd(), 'deployment.json');
   try {
@@ -73,12 +73,12 @@ const join = async (providers: CounterProviders, rli: Interface): Promise<Deploy
   return await api.joinContract(providers, contractAddress);
 };
 
-const deployOrJoin = async (providers: CounterProviders, rli: Interface): Promise<DeployedCounterContract | null> => {
+const deployOrJoin = async (providers: L2Providers, rli: Interface): Promise<DeployedL2Contract | null> => {
   while (true) {
     const choice = await rli.question(DEPLOY_OR_JOIN_QUESTION);
     switch (choice) {
       case '1':
-        return await api.deploy(providers, { privateCounter: 0 });
+        return await api.deploy(providers, { privateState: 0 });
       case '2':
         return await join(providers, rli);
       case '3':
@@ -90,19 +90,36 @@ const deployOrJoin = async (providers: CounterProviders, rli: Interface): Promis
   }
 };
 
-const mainLoop = async (providers: CounterProviders, rli: Interface): Promise<void> => {
-  const counterContract = await deployOrJoin(providers, rli);
-  if (counterContract === null) {
+const update = async (l2Contract: DeployedL2Contract, rli: Interface): Promise<void> => {
+  let hexStr = await rli.question('Enter new state root (hex string, e.g. 0xabc...): ');
+  if (hexStr.startsWith('0x') || hexStr.startsWith('0X')) {
+    hexStr = hexStr.slice(2);
+  }
+  if (hexStr.length > 64) {
+    logger.warn('Input too long, truncating to 32 bytes.');
+    hexStr = hexStr.slice(0, 64);
+  }
+  hexStr = hexStr.padEnd(64, '0');
+  const valueBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    valueBytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
+  }
+  await api.updateStateRoot(l2Contract, valueBytes);
+};
+
+const mainLoop = async (providers: L2Providers, rli: Interface): Promise<void> => {
+  const l2Contract = await deployOrJoin(providers, rli);
+  if (l2Contract === null) {
     return;
   }
   while (true) {
     const choice = await rli.question(MAIN_LOOP_QUESTION);
     switch (choice) {
       case '1':
-        await api.increment(counterContract, rli);
+        await update(l2Contract, rli);
         break;
       case '2':
-        await api.displayCounterValue(providers, counterContract);
+        await api.displayStateRoot(providers, l2Contract);
         break;
       case '3':
         logger.info('Exiting...');
@@ -168,10 +185,10 @@ export const run = async (config: Config, _logger: Logger, dockerEnv?: DockerCom
     env = await dockerEnv.up();
 
     if (config instanceof StandaloneConfig) {
-      config.indexer = mapContainerPort(env, config.indexer, 'counter-indexer');
-      config.indexerWS = mapContainerPort(env, config.indexerWS, 'counter-indexer');
-      config.node = mapContainerPort(env, config.node, 'counter-node');
-      config.proofServer = mapContainerPort(env, config.proofServer, 'counter-proof-server');
+      config.indexer = mapContainerPort(env, config.indexer, 'midnight-indexer');
+      config.indexerWS = mapContainerPort(env, config.indexerWS, 'midnight-indexer');
+      config.node = mapContainerPort(env, config.node, 'midnight-node');
+      config.proofServer = mapContainerPort(env, config.proofServer, 'midnight-proof-server');
     }
   }
   const wallet = await buildWallet(config, rli);
