@@ -1,5 +1,5 @@
 {
-  "name": "@midnight-ntwrk/counter-cli",
+  "name": "midnight-l2-contracts-cli",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
@@ -18,6 +18,6 @@
     "start-testnet-remote-ps": "npm run build && npm run testnet-remote-ps"
   },
   "dependencies": {
-    "@midnight-ntwrk/counter-contract": "*"
+    "midnight-l2-contracts": "*"
   }
 }

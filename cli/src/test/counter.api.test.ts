@@ -18,7 +18,7 @@ import { type Wallet } from '@midnight-ntwrk/wallet-api';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as api from '../api';
-import { type CounterProviders } from '../common-types';
+import { type L2Providers } from '../common-types';
 import { currentDir } from '../config';
 import { createLogger } from '../logger-utils';
 import { TestEnvironment } from './commons';
@@ -29,7 +29,7 @@ const logger = await createLogger(logDir);
 describe('API', () => {
   let testEnvironment: TestEnvironment;
   let wallet: Wallet & Resource;
-  let providers: CounterProviders;
+  let providers: L2Providers;
 
   beforeAll(
     async () => {
@@ -48,19 +48,19 @@ describe('API', () => {
   });
 
   it('should deploy the contract and increment the counter [@slow]', async () => {
-    const counterContract = await api.deploy(providers, { privateCounter: 0 });
-    expect(counterContract).not.toBeNull();
+    const l2Contract = await api.deploy(providers, { privateState: 0 });
+    expect(l2Contract).not.toBeNull();
 
-    const counter = await api.displayStateRoot(providers, counterContract);
-    expect(counter.stateRoot).toEqual(BigInt(0));
+    const l2 = await api.displayStateRoot(providers, l2Contract);
+    expect(l2.stateRoot).toEqual(BigInt(0));
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    const response = await api.updateStateRoot(counterContract);
+    const response = await api.updateStateRoot(l2Contract);
     expect(response.txHash).toMatch(/[0-9a-f]{64}/);
     expect(response.blockHeight).toBeGreaterThan(BigInt(0));
 
-    const counterAfter = await api.displayStateRoot(providers, counterContract);
+    const counterAfter = await api.displayStateRoot(providers, l2Contract);
     expect(counterAfter.stateRoot).toEqual(BigInt(1));
-    expect(counterAfter.contractAddress).toEqual(counter.contractAddress);
+    expect(counterAfter.contractAddress).toEqual(l2.contractAddress);
   });
 });

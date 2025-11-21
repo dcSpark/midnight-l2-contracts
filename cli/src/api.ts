@@ -16,7 +16,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
-import { Counter, type CounterPrivateState, witnesses } from '@midnight-ntwrk/counter-contract';
 import { type CoinInfo, nativeToken, Transaction, type TransactionId } from '@midnight-ntwrk/ledger';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
@@ -37,17 +36,13 @@ import { type Resource, WalletBuilder } from '@midnight-ntwrk/wallet';
 import { type Wallet } from '@midnight-ntwrk/wallet-api';
 import { Transaction as ZswapTransaction } from '@midnight-ntwrk/zswap';
 import { webcrypto } from 'crypto';
+import { L2, L2PrivateState, witnesses } from 'midnight-l2-contracts';
 import * as fs from 'node:fs';
 import * as fsAsync from 'node:fs/promises';
 import { type Logger } from 'pino';
 import * as Rx from 'rxjs';
 import { WebSocket } from 'ws';
-import {
-  type CounterContract,
-  type CounterPrivateStateId,
-  type CounterProviders,
-  type DeployedCounterContract,
-} from './common-types';
+import { L2PrivateStateId, type DeployedL2Contract, type L2Contract, type L2Providers } from './common-types';
 import { type Config, contractConfig } from './config';
 
 let logger: Logger;
@@ -56,59 +51,50 @@ let logger: Logger;
 // @ts-expect-error: It's needed to enable WebSocket usage through apollo
 globalThis.WebSocket = WebSocket;
 
-export const getCounterLedgerState = async (
-  providers: CounterProviders,
+export const getL2LedgerState = async (
+  providers: L2Providers,
   contractAddress: ContractAddress,
 ): Promise<Uint8Array | null> => {
   assertIsContractAddress(contractAddress);
   logger.info('Checking contract ledger state...');
   const state = await providers.publicDataProvider
     .queryContractState(contractAddress)
-    .then((contractState) => (contractState != null ? Counter.ledger(contractState.data).stateRoot : null));
+    .then((contractState) => (contractState != null ? L2.ledger(contractState.data).stateRoot : null));
   logger.info(`Ledger state: ${state}`);
   return state;
 };
 
-export const counterContractInstance: CounterContract = new Counter.Contract(witnesses);
+export const l2ContractInstance: L2Contract = new L2.Contract(witnesses);
 
-export const joinContract = async (
-  providers: CounterProviders,
-  contractAddress: string,
-): Promise<DeployedCounterContract> => {
-  const counterContract = await findDeployedContract(providers, {
+export const joinContract = async (providers: L2Providers, contractAddress: string): Promise<DeployedL2Contract> => {
+  const l2Contract = await findDeployedContract(providers, {
     contractAddress,
-    contract: counterContractInstance,
-    privateStateId: 'counterPrivateState',
-    initialPrivateState: { privateCounter: 0 },
+    contract: l2ContractInstance,
+    privateStateId: 'privateState',
+    initialPrivateState: { privateState: 0 },
   });
-  logger.info(`Joined contract at address: ${counterContract.deployTxData.public.contractAddress}`);
-  return counterContract;
+  logger.info(`Joined contract at address: ${l2Contract.deployTxData.public.contractAddress}`);
+  return l2Contract;
 };
 
-export const deploy = async (
-  providers: CounterProviders,
-  privateState: CounterPrivateState,
-): Promise<DeployedCounterContract> => {
-  logger.info('Deploying counter contract...');
-  const counterContract = await deployContract(providers, {
-    contract: counterContractInstance,
-    privateStateId: 'counterPrivateState',
+export const deploy = async (providers: L2Providers, privateState: L2PrivateState): Promise<DeployedL2Contract> => {
+  logger.info('Deploying L2 contract...');
+  const l2Contract = await deployContract(providers, {
+    contract: l2ContractInstance,
+    privateStateId: 'privateState',
     initialPrivateState: privateState,
   });
-  logger.info(`Deployed contract at address: ${counterContract.deployTxData.public.contractAddress}`);
+  logger.info(`Deployed contract at address: ${l2Contract.deployTxData.public.contractAddress}`);
   fs.writeFileSync(
     'deployment.json',
-    JSON.stringify({ contractAddress: counterContract.deployTxData.public.contractAddress }),
+    JSON.stringify({ contractAddress: l2Contract.deployTxData.public.contractAddress }),
   );
-  return counterContract;
+  return l2Contract;
 };
 
 import { type Interface } from 'node:readline/promises';
 
-export const updateStateRoot = async (
-  counterContract: DeployedCounterContract,
-  rli: Interface,
-): Promise<FinalizedTxData> => {
+export const updateStateRoot = async (l2Contract: DeployedL2Contract, rli: Interface): Promise<FinalizedTxData> => {
   logger.info('Updating state root...');
   let hexStr = await rli.question('Enter new state root (hex string, e.g. 0xabc...): ');
   if (hexStr.startsWith('0x') || hexStr.startsWith('0X')) {
@@ -123,21 +109,21 @@ export const updateStateRoot = async (
   for (let i = 0; i < 32; i++) {
     valueBytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
   }
-  const finalizedTxData = await counterContract.callTx.updateStateRoot(valueBytes);
+  const finalizedTxData = await l2Contract.callTx.updateStateRoot(valueBytes);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
 };
 
 export const displayStateRoot = async (
-  providers: CounterProviders,
-  counterContract: DeployedCounterContract,
+  providers: L2Providers,
+  l2Contract: DeployedL2Contract,
 ): Promise<{ stateRoot: Uint8Array | null; contractAddress: string }> => {
-  const contractAddress = counterContract.deployTxData.public.contractAddress;
-  const stateRootValue = await getCounterLedgerState(providers, contractAddress);
+  const contractAddress = l2Contract.deployTxData.public.contractAddress;
+  const stateRootValue = await getL2LedgerState(providers, contractAddress);
   if (stateRootValue === null) {
-    logger.info(`There is no counter contract deployed at ${contractAddress}.`);
+    logger.info(`There is no L2 contract deployed at ${contractAddress}.`);
   } else {
-    logger.info(`Current state root value: ${Number(stateRootValue)}`);
+    logger.info(`Current state root value: ${Buffer.from(stateRootValue).toString('hex')}`);
   }
   return { contractAddress, stateRoot: stateRootValue };
 };
@@ -344,7 +330,7 @@ export const buildFreshWallet = async (config: Config): Promise<Wallet & Resourc
 export const configureProviders = async (wallet: Wallet & Resource, config: Config) => {
   const walletAndMidnightProvider = await createWalletAndMidnightProvider(wallet);
   return {
-    privateStateProvider: levelPrivateStateProvider<typeof CounterPrivateStateId>({
+    privateStateProvider: levelPrivateStateProvider<typeof L2PrivateStateId>({
       privateStateStoreName: contractConfig.privateStateStoreName,
     }),
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),

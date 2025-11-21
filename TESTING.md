@@ -23,7 +23,7 @@ This document outlines the steps to verify that updated package versions do not 
 
 ## 4. Start the Remote Testnet
 
-- [ ] Run the following command in the `counter-cli` directory:
+- [ ] Run the following command in the `cli` directory:
   ```sh
   npm run start-testnet-remote
   ```

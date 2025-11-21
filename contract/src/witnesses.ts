@@ -14,8 +14,8 @@
 // limitations under the License.
 
 // This is how we type an empty object.
-export type CounterPrivateState = {
-  privateCounter: number;
+export type L2PrivateState = {
+  privateState: number;
 };
 
 export const witnesses = {};

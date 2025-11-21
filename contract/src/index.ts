@@ -13,5 +13,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export * as Counter from "./managed/counter/contract/index.cjs";
+export * as L2 from "./managed/L2/contract/index.cjs";
 export * from "./witnesses";

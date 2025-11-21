@@ -28,10 +28,10 @@ updates:
       - 'contract'
 
   - package-ecosystem: "npm"
-    directory: "/counter-cli"
+    directory: "/cli"
     schedule:
       interval: "daily"
     labels:
       - 'dependencies'
       - 'npm'
-      - 'counter-cli'
+      - 'cli'

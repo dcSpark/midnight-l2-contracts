@@ -1,17 +1,17 @@
-# Counter DApp
+# Midnight L2 contracts
 
 [![Generic badge](https://img.shields.io/badge/Compact%20Compiler-0.25.0-1abc9c.svg)](https://shields.io/) [![Generic badge](https://img.shields.io/badge/TypeScript-5.8.3-blue.svg)](https://shields.io/)
 
-A Midnight smart contract example demonstrating counter functionality with zero-knowledge proofs on testnet.
+Midnight L1 smart contracts supporting our Midnight L2.
 
 ## Project Structure
 
 ```
-example-counter/
-├── contract/               # Smart contract in Compact language
-│   ├── src/counter.compact # The actual smart contract
+midnight-l2-contracts/
+├── contract/               # Smart contracts in Compact language
+│   ├── src/L2.compact      # Contract tracking current L2 state root
 │   └── src/test/           # Contract unit tests
-└── counter-cli/            # Command-line interface
+└── cli/                    # Command-line interface
     └── src/                # CLI implementation
 ```
 
@@ -105,7 +105,7 @@ npm run build && npm run test
 Navigate to CLI directory and build the project:
 
 ```bash
-cd ../counter-cli && npm run build
+cd ../cli && npm run build
 ```
 
 ### Start the Proof Server
@@ -145,15 +145,15 @@ npm run testnet-remote-ps
 
 If this fails with "Could not find a working container runtime strategy", use Option A instead.
 
-## Run the Counter DApp
+## Run the CLI
 
 Open a new terminal (keep proof server running in the first one).
 
 ```bash
-cd counter-cli && npm run start-testnet-remote
+cd cli && npm run start-testnet-remote
 ```
 
-## Using the Counter DApp
+## Using the contract from the CLI
 
 ### Create a Wallet
 
@@ -188,7 +188,7 @@ Your wallet balance is: 1000000000
 
 ### Deploy Your Contract
 
-1. Choose option `1` to deploy a new counter contract
+1. Choose option `1` to deploy a new contract
 2. Wait for deployment (takes ~30 seconds)
 3. **Save the contract address** for future use
 
@@ -202,8 +202,8 @@ Deployed contract at address: [contract address]
 
 You can now:
 
-- **Increment** the counter (submits a transaction to testnet)
-- **Display** current counter value (queries the blockchain)
+- **Update** the state root (submits a transaction to testnet)
+- **Display** current state root value (queries the blockchain)
 - **Exit** when done
 
 Each increment creates a real transaction on Midnight Testnet.
