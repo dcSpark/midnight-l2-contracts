@@ -79,10 +79,18 @@ export const joinContract = async (providers: L2Providers, contractAddress: stri
 
 export const deploy = async (providers: L2Providers, privateState: L2PrivateState): Promise<DeployedL2Contract> => {
   logger.info('Deploying L2 contract...');
+  const signer0 = new Uint8Array(32);
+  signer0.set([0x01]);
+  const signer1 = new Uint8Array(32);
+  signer1.set([0x02]);
+  const signer2 = new Uint8Array(32);
+  signer2.set([0x03]);
+  const signers = [signer0, signer1, signer2];
   const l2Contract = await deployContract(providers, {
     contract: l2ContractInstance,
     privateStateId: 'privateState',
     initialPrivateState: privateState,
+    args: [signers, new Uint8Array(32)],
   });
   logger.info(`Deployed contract at address: ${l2Contract.deployTxData.public.contractAddress}`);
   fs.writeFileSync(
@@ -97,7 +105,9 @@ export const updateStateRoot = async (
   newRoot: Uint8Array,
 ): Promise<FinalizedTxData> => {
   logger.info('Updating state root...');
-  const finalizedTxData = await l2Contract.callTx.updateStateRoot(newRoot);
+  const signature = new Uint8Array(32);
+  signature.set([0x01]);
+  const finalizedTxData = await l2Contract.callTx.updateStateRoot(newRoot, signature);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
 };

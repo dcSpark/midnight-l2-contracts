@@ -47,7 +47,7 @@ describe('API', () => {
     await testEnvironment.shutdown();
   });
 
-  it('should deploy the contract and increment the counter [@slow]', async () => {
+  it('should deploy the contract and update the state root [@slow]', async () => {
     const l2Contract = await api.deploy(providers, { privateState: 0 });
     expect(l2Contract).not.toBeNull();
 

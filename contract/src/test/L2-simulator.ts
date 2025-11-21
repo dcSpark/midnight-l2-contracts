@@ -34,12 +34,20 @@ export class L2Simulator {
 
   constructor() {
     this.contract = new Contract<L2PrivateState>(witnesses);
+    const initialSigners = new Array<Uint8Array>(3);
+    for (let i = 0; i < 3; i++) {
+      const signer = new Uint8Array(32);
+      signer[0] = i + 1;
+      initialSigners[i] = signer;
+    }
     const {
       currentPrivateState,
       currentContractState,
       currentZswapLocalState
     } = this.contract.initialState(
-      constructorContext({ privateState: 0 }, "0".repeat(64))
+      constructorContext({ privateState: 0 }, "0".repeat(64)),
+      initialSigners,
+      new Uint8Array(32)
     );
     this.circuitContext = {
       currentPrivateState,
@@ -60,11 +68,12 @@ export class L2Simulator {
     return this.circuitContext.currentPrivateState;
   }
 
-  public updateStateRoot(val: Uint8Array): Ledger {
+  public updateStateRoot(val: Uint8Array, signature: Uint8Array): Ledger {
     // Update the current context to be the result of executing the circuit.
     this.circuitContext = this.contract.impureCircuits.updateStateRoot(
       this.circuitContext,
-      val
+      val,
+      signature
     ).context;
     return ledger(this.circuitContext.transactionContext.state);
   }

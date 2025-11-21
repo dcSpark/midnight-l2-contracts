@@ -33,6 +33,7 @@ describe("L2 smart contract", () => {
     const simulator = new L2Simulator();
     const initialLedgerState = simulator.getLedger();
     expect(initialLedgerState.stateRoot).toEqual(new Uint8Array(32));
+    expect(initialLedgerState.signers).toBeDefined();
     const initialPrivateState = simulator.getPrivateState();
     expect(initialPrivateState).toEqual({ privateState: 0 });
   });
@@ -41,9 +42,22 @@ describe("L2 smart contract", () => {
     const simulator = new L2Simulator();
     const newRoot = new Uint8Array(32);
     newRoot.set([0x61, 0x62, 0x63]);
-    const nextLedgerState = simulator.updateStateRoot(newRoot);
+    const signature = new Uint8Array(32);
+    signature.set([0x01]);
+    const nextLedgerState = simulator.updateStateRoot(newRoot, signature);
     expect(nextLedgerState.stateRoot).toEqual(newRoot);
     const nextPrivateState = simulator.getPrivateState();
     expect(nextPrivateState).toEqual({ privateState: 0 });
+  });
+
+  it("doesn't update state root when signature doesn't verify", () => {
+    const simulator = new L2Simulator();
+    const oldRoot = simulator.getLedger().stateRoot;
+    const newRoot = new Uint8Array(32);
+    newRoot.set([0x61, 0x62, 0x63]);
+    const signature = new Uint8Array(32);
+    signature.set([0x09]);
+    expect(() => simulator.updateStateRoot(newRoot, signature)).toThrow();
+    expect(simulator.getLedger().stateRoot).toEqual(oldRoot);
   });
 });
