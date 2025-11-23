@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
-// You may not use this file except in compliance with the License.
+// you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -17,27 +17,42 @@ pragma language_version >= 0.16 && <= 0.18;
 
 import CompactStandardLibrary;
 
+export struct Signature {
+  r: CurvePoint,
+  s: Field
+}
+
 // public state
-export ledger signers: Vector<3, Bytes<32>>;
+export ledger signers: Vector<3, CurvePoint>;
 export ledger stateRoot: Bytes<32>;
 
-constructor(newSigners: Vector<3, Bytes<32>>, initialStateRoot: Bytes<32>) {
+constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
   signers = disclose(newSigners);
   stateRoot = disclose(initialStateRoot);
 }
 
-// Mock verification; we wait for Midnight to ship verification primitives.
-export circuit verifySignature(message: Bytes<32>, signature: Bytes<32>): Boolean {
-  if (disclose(signature) == signers[0] || 
-      disclose(signature) == signers[1] || 
-      disclose(signature) == signers[2]) {
-    return true;
-  } else {
-    return false;
-  }
+export circuit verifySignature(
+  pk: CurvePoint,
+  msg: Bytes<32>,
+  sig: Signature
+): Boolean {
+  const challengeInput = [sig.r, pk, degradeToTransient(msg)];
+  const e = transientHash<[CurvePoint, CurvePoint, Field]>(challengeInput);
+  const lhs = ecMulGenerator(sig.s);
+  const eTimesPk = ecMul(pk, e);
+  const rhs = ecAdd(sig.r, eTimesPk);
+  return lhs == rhs;
 }
 
-export circuit updateStateRoot(newRoot: Bytes<32>, signature: Bytes<32>): [] {
-  assert(verifySignature(newRoot, signature), "Invalid signature");
-  stateRoot = disclose(newRoot);
+export circuit updateStateRoot(newRoot: Bytes<32>, signature: Signature): [] {
+  // Check if the signature is valid for any of the authorized signers
+  const sig = disclose(signature);
+  const root = disclose(newRoot);
+  const valid = 
+    verifySignature(signers[0], root, sig) ||
+    verifySignature(signers[1], root, sig) ||
+    verifySignature(signers[2], root, sig);
+
+  assert(valid, "Invalid signature");
+  stateRoot = root;
 }
