@@ -13,9 +13,9 @@ module Crypto {
     b2: Bytes<32>;
   }
 
-  struct Bytes64 {
-    b0: Bytes<32>;
-    b1: Bytes<32>;
+  struct NonceInput {
+    sk: Field;
+    msg: Bytes<32>;
   }
 
   export struct Signature {
@@ -24,20 +24,19 @@ module Crypto {
     s: Field;
   }
 
-  export pure circuit derivePk(skBytes: Bytes<32>): [Field, CurvePoint] {
-    // Convert skBytes to Field
-    const sk: Field = transientHash<Bytes<32>>(skBytes);
+  export pure circuit derivePk(sk: Field): CurvePoint {
     // Compute public key: pk = sk * B
     const pk: CurvePoint = ecMulGenerator(sk);
-    return [sk, pk];
+    return pk;
   }
 
-  export pure circuit sign(msg: Bytes<32>, skBytes: Bytes<32>): Signature {
-    const [sk, pk] = derivePk(skBytes);
+  export pure circuit sign(msg: Bytes<32>, sk: Field, nonce: Field): [Signature, Field] {
+    const pk = derivePk(sk);
 
     // Derive nonce k deterministically: k = H(skBytes || msg)
-    const nonceInput: Bytes64 = Bytes64 { b0: skBytes, b1: msg };
-    const k: Field = transientHash<Bytes64>(nonceInput); // Hash to scalar
+    // const nonceInput: NonceInput = NonceInput { sk: sk, msg: msg };
+    // const k: Field = transientHash<NonceInput>(nonceInput); // Hash to scalar
+    const k = nonce;
 
     // Compute R = k * B
     const R: CurvePoint = ecMulGenerator(k);
@@ -55,7 +54,7 @@ module Crypto {
     // Compute signature: s = k + c * sk
     const s: Field = k + (c * sk);
 
-    return Signature { pk: pk, R: R, s: s };
+    return [Signature { pk: pk, R: R, s: s }, c];
   }
 
   export pure circuit verifySignature(msg: Bytes<32>, signature: Signature): [] {

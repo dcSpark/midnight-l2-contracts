@@ -13,13 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as runtime from "@midnight-ntwrk/compact-runtime";
+// import * as runtime from "@midnight-ntwrk/compact-runtime";
 import {
   type CircuitContext,
   constructorContext,
   type CurvePoint,
-  degradeToTransient,
-  ecMulGenerator,
   QueryContext,
   sampleContractAddress
 } from "@midnight-ntwrk/compact-runtime";
@@ -27,6 +25,7 @@ import {
   Contract,
   type Ledger,
   ledger,
+  pureCircuits,
   type Signature
 } from "../managed/L2/contract/index.cjs";
 import { type L2PrivateState, witnesses } from "../witnesses.js";
@@ -38,16 +37,14 @@ export class L2Simulator {
 
   constructor() {
     this.contract = new Contract<L2PrivateState>(witnesses);
-    this.signers = [];
-    const initialSigners: CurvePoint[] = [];
 
     // Generate 3 random key pairs (deterministically for tests)
     // Use small values to ensure they're well within the field
+    this.signers = [];
     for (let i = 1; i <= 3; i++) {
-      const sk = BigInt(i + 100); // Simple small deterministic keys
-      const pk = ecMulGenerator(sk);
+      const sk = BigInt(i + 100);
+      const pk = pureCircuits.derivePk(sk);
       this.signers.push({ sk, pk });
-      initialSigners.push(pk);
     }
 
     const {
@@ -56,7 +53,7 @@ export class L2Simulator {
       currentZswapLocalState
     } = this.contract.initialState(
       constructorContext({ privateState: 0 }, "0".repeat(64)),
-      initialSigners,
+      this.signers.map((s) => s.pk),
       new Uint8Array(32)
     );
     this.circuitContext = {
@@ -89,53 +86,25 @@ export class L2Simulator {
     if (signerIndex < 0 || signerIndex >= this.signers.length) {
       throw new Error("Invalid signer index");
     }
-    const { sk, pk } = this.signers[signerIndex];
-    const msgField = degradeToTransient(val);
 
-    // The embedded curve (Jubjub) scalar field order
     const JUBJUB_SCALAR_FIELD =
       6554484396890773809930967563523245729705921265872317281365359162392183254199n;
-
-    // Create a CompactType for the tuple [CurvePoint, CurvePoint, Field]
-    const tupleType = {
-      alignment: () => [
-        { tag: "atom" as const, value: { tag: "field" as const } },
-        { tag: "atom" as const, value: { tag: "field" as const } },
-        { tag: "atom" as const, value: { tag: "field" as const } },
-        { tag: "atom" as const, value: { tag: "field" as const } },
-        { tag: "atom" as const, value: { tag: "field" as const } }
-      ],
-      toValue: (val: [CurvePoint, CurvePoint, bigint]) => [
-        ...runtime.bigIntToValue(val[0].x),
-        ...runtime.bigIntToValue(val[0].y),
-        ...runtime.bigIntToValue(val[1].x),
-        ...runtime.bigIntToValue(val[1].y),
-        ...runtime.bigIntToValue(val[2])
-      ],
-      fromValue: (_: any) => {
-        throw new Error("Not implemented");
-      }
-    };
-
-    // Grind for a valid e that fits in the Jubjub scalar field
-    let k, r, e;
     let attempt = 0;
+    let nonce = 0n;
     while (true) {
       attempt++;
-      k = BigInt((signerIndex + 1) * 12345 + attempt);
-      r = ecMulGenerator(k);
-
-      e = runtime.transientHash(tupleType, [r, pk, msgField]);
-
-      if (e < JUBJUB_SCALAR_FIELD) {
+      const k = BigInt((signerIndex + 1) * 12345 + attempt);
+      const [sig, challenge] = pureCircuits.sign(
+        val,
+        this.signers[signerIndex].sk,
+        k
+      );
+      if (challenge < JUBJUB_SCALAR_FIELD && sig.s < JUBJUB_SCALAR_FIELD) {
+        nonce = k;
         break;
       }
     }
-
-    // For Schnorr: s = k + e*sk mod q
-    const s = (k + e * sk) % JUBJUB_SCALAR_FIELD;
-
-    return { r, s };
+    return pureCircuits.sign(val, this.signers[signerIndex].sk, nonce)[0];
   }
 
   public updateStateRoot(val: Uint8Array, signature: Signature): Ledger {
