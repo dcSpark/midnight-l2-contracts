@@ -16,11 +16,7 @@
 pragma language_version >= 0.16 && <= 0.18;
 
 import CompactStandardLibrary;
-
-export struct Signature {
-  r: CurvePoint,
-  s: Field
-}
+import "vendor/bricktowers/Crypto";
 
 // public state
 export ledger signers: Vector<3, CurvePoint>;
@@ -31,28 +27,16 @@ constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
   stateRoot = disclose(initialStateRoot);
 }
 
-export circuit verifySignature(
-  pk: CurvePoint,
-  msg: Bytes<32>,
-  sig: Signature
-): Boolean {
-  const challengeInput = [sig.r, pk, degradeToTransient(msg)];
-  const e = transientHash<[CurvePoint, CurvePoint, Field]>(challengeInput);
-  const lhs = ecMulGenerator(sig.s);
-  const eTimesPk = ecMul(pk, e);
-  const rhs = ecAdd(sig.r, eTimesPk);
-  return lhs == rhs;
-}
+export circuit updateStateRoot(newRoot: Bytes<32>, sig: Signature): [] {
+  verifySignature(newRoot, sig);
 
-export circuit updateStateRoot(newRoot: Bytes<32>, signature: Signature): [] {
-  // Check if the signature is valid for any of the authorized signers
-  const sig = disclose(signature);
-  const root = disclose(newRoot);
-  const valid = 
-    verifySignature(signers[0], root, sig) ||
-    verifySignature(signers[1], root, sig) ||
-    verifySignature(signers[2], root, sig);
+  const pk = disclose(sig).pk;
+  const isAllowed: Boolean =
+    (pk == signers[0]) ||
+    (pk == signers[1]) ||
+    (pk == signers[2]);
 
-  assert(valid, "Invalid signature");
-  stateRoot = root;
+  assert(isAllowed, "unauthorized signer");
+
+  stateRoot = disclose(newRoot);
 }
