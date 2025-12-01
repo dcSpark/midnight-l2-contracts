@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
-// You may not use this file except in compliance with the License.
+// you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -18,7 +18,9 @@ import {
   setNetworkId
 } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, expect, it } from "vitest";
+// import { pureCircuits } from "../managed/L2/contract/index.cjs";
 import { L2Simulator } from "./L2-simulator.js";
+import { pureCircuits } from "../managed/L2/contract/index.cjs";
 
 setNetworkId(NetworkId.Undeployed);
 
@@ -42,8 +44,10 @@ describe("L2 smart contract", () => {
     const simulator = new L2Simulator();
     const newRoot = new Uint8Array(32);
     newRoot.set([0x61, 0x62, 0x63]);
-    const signature = new Uint8Array(32);
-    signature.set([0x01]);
+
+    const signature = simulator.sign(newRoot, 0); // Sign with signer 0
+    expect(pureCircuits.verifySignature(newRoot, signature)).toBe(true);
+
     const nextLedgerState = simulator.updateStateRoot(newRoot, signature);
     expect(nextLedgerState.stateRoot).toEqual(newRoot);
     const nextPrivateState = simulator.getPrivateState();
@@ -55,9 +59,20 @@ describe("L2 smart contract", () => {
     const oldRoot = simulator.getLedger().stateRoot;
     const newRoot = new Uint8Array(32);
     newRoot.set([0x61, 0x62, 0x63]);
-    const signature = new Uint8Array(32);
-    signature.set([0x09]);
+
+    // Create invalid signature (use valid structure but wrong value)
+    const validSig = simulator.sign(newRoot, 0);
+    const signature = { ...validSig, s: validSig.s + 1n };
+
     expect(() => simulator.updateStateRoot(newRoot, signature)).toThrow();
     expect(simulator.getLedger().stateRoot).toEqual(oldRoot);
+  });
+
+  it("verifies a valid signature", () => {
+    const simulator = new L2Simulator();
+    const msg = new Uint8Array(32).fill(1);
+    const signature = simulator.sign(msg, 0);
+
+    expect(pureCircuits.verifySignature(msg, signature)).toBe(true);
   });
 });

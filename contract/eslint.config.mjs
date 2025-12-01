@@ -44,7 +44,8 @@ export default [
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/explicit-function-return-type": "off",
-      "@typescript-eslint/consistent-type-definitions": "off"
+      "@typescript-eslint/consistent-type-definitions": "off",
+      "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
     }
   },
   {

@@ -44,6 +44,7 @@ import * as Rx from 'rxjs';
 import { WebSocket } from 'ws';
 import { type DeployedL2Contract, type L2Contract, L2PrivateStateId, type L2Providers } from './common-types';
 import { type Config, contractConfig } from './config';
+import { Signer } from './signer';
 
 let logger: Logger;
 // Instead of setting globalThis.crypto which is read-only, we'll ensure crypto is available
@@ -79,13 +80,7 @@ export const joinContract = async (providers: L2Providers, contractAddress: stri
 
 export const deploy = async (providers: L2Providers, privateState: L2PrivateState): Promise<DeployedL2Contract> => {
   logger.info('Deploying L2 contract...');
-  const signer0 = new Uint8Array(32);
-  signer0.set([0x01]);
-  const signer1 = new Uint8Array(32);
-  signer1.set([0x02]);
-  const signer2 = new Uint8Array(32);
-  signer2.set([0x03]);
-  const signers = [signer0, signer1, signer2];
+  const signers = new Signer().signersPub;
   const l2Contract = await deployContract(providers, {
     contract: l2ContractInstance,
     privateStateId: 'privateState',
@@ -105,8 +100,8 @@ export const updateStateRoot = async (
   newRoot: Uint8Array,
 ): Promise<FinalizedTxData> => {
   logger.info('Updating state root...');
-  const signature = new Uint8Array(32);
-  signature.set([0x01]);
+  const signer = new Signer();
+  const signature = signer.sign(newRoot, 0);
   const finalizedTxData = await l2Contract.callTx.updateStateRoot(newRoot, signature);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
