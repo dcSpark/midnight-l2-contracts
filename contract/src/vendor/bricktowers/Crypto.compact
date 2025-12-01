@@ -3,80 +3,48 @@ pragma language_version >= 0.16 && <= 0.18;
 module Crypto {
   import CompactStandardLibrary;
 
-  circuit pointToBytes(p: CurvePoint): Bytes<32> {
-    return persistentHash<CurvePoint>(p);
-  }
-
-  struct Bytes96 {
-    b0: Bytes<32>;
-    b1: Bytes<32>;
-    b2: Bytes<32>;
-  }
-
-  struct NonceInput {
-    sk: Field;
-    msg: Bytes<32>;
-  }
-
   export struct Signature {
     pk: CurvePoint;
-    R: CurvePoint;
+    r: CurvePoint;
     s: Field;
   }
 
-  export pure circuit derivePk(sk: Field): CurvePoint {
-    // Compute public key: pk = sk * B
-    const pk: CurvePoint = ecMulGenerator(sk);
-    return pk;
+  export struct Challenge {
+    r: CurvePoint;
+    pk: CurvePoint;
+    msg: Bytes<32>;
   }
 
-  export pure circuit sign(msg: Bytes<32>, sk: Field, nonce: Field): [Signature, Field] {
+  export pure circuit derivePk(sk: Field): CurvePoint {
+    return ecMulGenerator(sk);
+  }
+
+  export pure circuit computeChallenge(r: CurvePoint, pk: CurvePoint, msg: Bytes<32>): Field {
+    const c: Bytes<32> = persistentHash<Challenge>(Challenge {
+      r: r,
+      pk: pk,
+      msg: msg
+    });
+    return degradeToTransient(c);
+  }
+
+  export pure circuit sign(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
     const pk = derivePk(sk);
 
-    // Derive nonce k deterministically: k = H(skBytes || msg)
-    // const nonceInput: NonceInput = NonceInput { sk: sk, msg: msg };
-    // const k: Field = transientHash<NonceInput>(nonceInput); // Hash to scalar
-    const k = nonce;
+    const r: CurvePoint = ecMulGenerator(nonce);
+    const c: Field = computeChallenge(r, pk, msg);
+    const s: Field = nonce + (c * sk);
 
-    // Compute R = k * B
-    const R: CurvePoint = ecMulGenerator(k);
-
-    // Compute challenge: c = H(R || pk || msg)
-    const RBytes: Bytes<32> = pointToBytes(R);
-    const pkBytes: Bytes<32> = pointToBytes(pk);
-    const cBytes: Bytes96 = Bytes96 {
-      b0: RBytes,
-      b1: pkBytes,
-      b2: msg
-    };
-    const c: Field = transientHash<Bytes96>(cBytes);
-
-    // Compute signature: s = k + c * sk
-    const s: Field = k + (c * sk);
-
-    return [Signature { pk: pk, R: R, s: s }, c];
+    return Signature { pk: pk, r: r, s: s };
   }
 
-  export pure circuit verifySignature(msg: Bytes<32>, signature: Signature): [] {
-    const {pk, R, s} = signature;
-    // Compute challenge: c = H(R || pk || msg)
-    const RBytes: Bytes<32> = pointToBytes(R);
-    const pkBytes: Bytes<32> = pointToBytes(pk);
-    const cBytes: Bytes96 = Bytes96 {
-      b0: RBytes,
-      b1: pkBytes,
-      b2: msg
-    };
-    const c: Field = transientHash<Bytes96>(cBytes);
+  export pure circuit verifySignature(msg: Bytes<32>, signature: Signature): Boolean {
+    const {pk, r, s} = signature;
+    const c: Field = computeChallenge(r, pk, msg);
 
-    // Left-hand side: s * B
     const lhs: CurvePoint = ecMulGenerator(s);
+    const rhs: CurvePoint = ecAdd(r, ecMul(pk, c));
 
-    // Right-hand side: R + c * pk
-    const cPk: CurvePoint = ecMul(pk, c);
-    const rhs: CurvePoint = ecAdd(R, cPk);
-
-    // Enforce verification equation
-    assert(lhs == rhs, "Signature verification failed");
+    return lhs == rhs;
   }
 }

@@ -90,21 +90,14 @@ export class L2Simulator {
     const JUBJUB_SCALAR_FIELD =
       6554484396890773809930967563523245729705921265872317281365359162392183254199n;
     let attempt = 0;
-    let nonce = 0n;
     while (true) {
       attempt++;
       const k = BigInt((signerIndex + 1) * 12345 + attempt);
-      const [sig, challenge] = pureCircuits.sign(
-        val,
-        this.signers[signerIndex].sk,
-        k
-      );
-      if (challenge < JUBJUB_SCALAR_FIELD && sig.s < JUBJUB_SCALAR_FIELD) {
-        nonce = k;
-        break;
+      const sig = pureCircuits.sign(val, this.signers[signerIndex].sk, k);
+      if (sig.s < JUBJUB_SCALAR_FIELD) {
+        return sig;
       }
     }
-    return pureCircuits.sign(val, this.signers[signerIndex].sk, nonce)[0];
   }
 
   public updateStateRoot(val: Uint8Array, signature: Signature): Ledger {

@@ -46,33 +46,33 @@ describe("L2 smart contract", () => {
     newRoot.set([0x61, 0x62, 0x63]);
 
     const signature = simulator.sign(newRoot, 0); // Sign with signer 0
-    pureCircuits.verifySignature(newRoot, signature);
+    expect(pureCircuits.verifySignature(newRoot, signature)).toBe(true);
 
-    // const nextLedgerState = simulator.updateStateRoot(newRoot, signature);
-    // expect(nextLedgerState.stateRoot).toEqual(newRoot);
-    // const nextPrivateState = simulator.getPrivateState();
-    // expect(nextPrivateState).toEqual({ privateState: 0 });
+    const nextLedgerState = simulator.updateStateRoot(newRoot, signature);
+    expect(nextLedgerState.stateRoot).toEqual(newRoot);
+    const nextPrivateState = simulator.getPrivateState();
+    expect(nextPrivateState).toEqual({ privateState: 0 });
   });
 
-  // it("doesn't update state root when signature doesn't verify", () => {
-  //   const simulator = new L2Simulator();
-  //   const oldRoot = simulator.getLedger().stateRoot;
-  //   const newRoot = new Uint8Array(32);
-  //   newRoot.set([0x61, 0x62, 0x63]);
+  it("doesn't update state root when signature doesn't verify", () => {
+    const simulator = new L2Simulator();
+    const oldRoot = simulator.getLedger().stateRoot;
+    const newRoot = new Uint8Array(32);
+    newRoot.set([0x61, 0x62, 0x63]);
 
-  //   // Create invalid signature (use valid structure but wrong value)
-  //   const validSig = simulator.sign(newRoot, 0);
-  //   const signature = { ...validSig, s: validSig.s + 1n };
+    // Create invalid signature (use valid structure but wrong value)
+    const validSig = simulator.sign(newRoot, 0);
+    const signature = { ...validSig, s: validSig.s + 1n };
 
-  //   expect(() => simulator.updateStateRoot(newRoot, signature)).toThrow();
-  //   expect(simulator.getLedger().stateRoot).toEqual(oldRoot);
-  // });
+    expect(() => simulator.updateStateRoot(newRoot, signature)).toThrow();
+    expect(simulator.getLedger().stateRoot).toEqual(oldRoot);
+  });
 
-  // it("verifies a valid signature", () => {
-  //   const simulator = new L2Simulator();
-  //   const msg = new Uint8Array(32).fill(1);
-  //   const signature = simulator.sign(msg, 0);
+  it("verifies a valid signature", () => {
+    const simulator = new L2Simulator();
+    const msg = new Uint8Array(32).fill(1);
+    const signature = simulator.sign(msg, 0);
 
-  //   expect(pureCircuits.verifySignature(msg, signature)).toBe(true);
-  // });
+    expect(pureCircuits.verifySignature(msg, signature)).toBe(true);
+  });
 });
