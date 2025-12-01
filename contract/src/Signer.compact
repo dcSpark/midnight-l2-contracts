@@ -1,6 +1,6 @@
 pragma language_version >= 0.16 && <= 0.18;
 
-module Crypto {
+module Signer {
   import CompactStandardLibrary;
 
   export struct Signature {

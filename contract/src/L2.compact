@@ -1,7 +1,7 @@
 pragma language_version >= 0.16 && <= 0.18;
 
 import CompactStandardLibrary;
-import "vendor/bricktowers/Crypto";
+import Signer;
 
 // exports from Crypto to enable off-chain pk derivation, signing, verification
 export { derivePk, sign, Signature, verifySignature };
