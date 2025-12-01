@@ -1,0 +1,50 @@
+pragma language_version >= 0.16 && <= 0.18;
+
+module Signer {
+  import CompactStandardLibrary;
+
+  export struct Signature {
+    pk: CurvePoint;
+    r: CurvePoint;
+    s: Field;
+  }
+
+  export struct Challenge {
+    r: CurvePoint;
+    pk: CurvePoint;
+    msg: Bytes<32>;
+  }
+
+  export pure circuit derivePk(sk: Field): CurvePoint {
+    return ecMulGenerator(sk);
+  }
+
+  export pure circuit computeChallenge(r: CurvePoint, pk: CurvePoint, msg: Bytes<32>): Field {
+    const c: Bytes<32> = persistentHash<Challenge>(Challenge {
+      r: r,
+      pk: pk,
+      msg: msg
+    });
+    return degradeToTransient(c);
+  }
+
+  export pure circuit sign(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
+    const pk = derivePk(sk);
+
+    const r: CurvePoint = ecMulGenerator(nonce);
+    const c: Field = computeChallenge(r, pk, msg);
+    const s: Field = nonce + (c * sk);
+
+    return Signature { pk: pk, r: r, s: s };
+  }
+
+  export pure circuit verifySignature(msg: Bytes<32>, signature: Signature): Boolean {
+    const {pk, r, s} = signature;
+    const c: Field = computeChallenge(r, pk, msg);
+
+    const lhs: CurvePoint = ecMulGenerator(s);
+    const rhs: CurvePoint = ecAdd(r, ecMul(pk, c));
+
+    return lhs == rhs;
+  }
+}
