@@ -6,10 +6,19 @@ import Signer;
 // exports from Crypto to enable off-chain pk derivation, signing, verification
 export { derivePk, sign, Signature, verifySignature };
 
-// public state
+// PUBLIC STATE
+// Multisig
 export ledger signers: Vector<3, CurvePoint>;
 export ledger stateRoot: Bytes<32>;
 
+// Bridge
+// - balances: how much NIGHT each user has currently deposited (TODO: extend to any tokens)
+export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;
+
+witness userPubKey(): ZswapCoinPublicKey;
+
+
+// MULTISIG + STATE ROOT UPDATES
 constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
   signers = disclose(newSigners);
   stateRoot = disclose(initialStateRoot);
@@ -27,4 +36,34 @@ export circuit updateStateRoot(newRoot: Bytes<32>, sig: Signature): [] {
   assert(isAllowed, "Unauthorized signer");
 
   stateRoot = disclose(newRoot);
+}
+
+// BRIDGING FUNCTIONALITY
+export circuit deposit(coin_: CoinInfo, l2_receiver: Bytes<32>): [] {
+  const coin = disclose(coin_);
+
+  receive(coin);
+
+  // TODO: make l2_receiver visible in some way (events?)
+
+  // assert coin is NIGHT for now
+  assert(coin.color == nativeToken(), "Only NIGHT deposits supported for now");
+
+  const pk = disclose(userPubKey());
+  const amount = disclose(coin.value);
+  if (balances.member(pk)) {
+    const old = balances.lookup(pk);
+    balances.insert(pk, old + amount as Uint<128>);
+  } else {
+    balances.insert(pk, amount);
+  }
+}
+
+export circuit getBalance(user_: ZswapCoinPublicKey): Uint<128> {
+  const user = disclose(user_);
+  if (balances.member(user)) {
+    return balances.lookup(user);
+  } else {
+    return 0 as Uint<128>;
+  }
 }

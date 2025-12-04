@@ -18,9 +18,8 @@ import {
   setNetworkId
 } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, expect, it } from "vitest";
-// import { pureCircuits } from "../managed/L2/contract/index.cjs";
-import { L2Simulator } from "./L2-simulator.js";
 import { pureCircuits } from "../managed/L2/contract/index.cjs";
+import { L2Simulator } from "./L2-simulator.js";
 
 setNetworkId(NetworkId.Undeployed);
 
@@ -28,7 +27,14 @@ describe("L2 smart contract", () => {
   it("generates initial ledger state deterministically", () => {
     const simulator0 = new L2Simulator();
     const simulator1 = new L2Simulator();
-    expect(simulator0.getLedger()).toEqual(simulator1.getLedger());
+
+    function bigintReplacer(key: string, value: any) {
+      return typeof value === "bigint" ? value.toString() : value;
+    }
+
+    expect(JSON.stringify(simulator0.getLedger(), bigintReplacer)).toEqual(
+      JSON.stringify(simulator1.getLedger(), bigintReplacer)
+    );
   });
 
   it("properly initializes ledger state and private state", () => {

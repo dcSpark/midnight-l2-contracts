@@ -19,6 +19,8 @@ import {
   QueryContext,
   sampleContractAddress
 } from "@midnight-ntwrk/compact-runtime";
+import { encodeContractAddress } from "@midnight-ntwrk/ledger";
+import { nativeToken } from "@midnight-ntwrk/zswap";
 import {
   Contract,
   type Ledger,
@@ -106,5 +108,23 @@ export class L2Simulator {
       signature
     ).context;
     return ledger(this.circuitContext.transactionContext.state);
+  }
+
+  public deposit(amount: bigint, l2_receiver: Uint8Array): void {
+    this.circuitContext = this.contract.impureCircuits.deposit(
+      this.circuitContext,
+      {
+        nonce: new Uint8Array(32),
+        color: encodeContractAddress(nativeToken()),
+        value: amount
+      },
+      l2_receiver
+    ).context;
+  }
+
+  public getBalance(user: Uint8Array): bigint {
+    return this.contract.impureCircuits.getBalance(this.circuitContext, {
+      bytes: user
+    }).result;
   }
 }
