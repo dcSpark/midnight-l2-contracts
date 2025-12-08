@@ -52,7 +52,9 @@ describe("L2 smart contract", () => {
     newRoot.set([0x61, 0x62, 0x63]);
 
     const signature = simulator.sign(newRoot, 0); // Sign with signer 0
-    expect(pureCircuits.verifySignature(newRoot, signature)).toBe(true);
+    expect(pureCircuits.verifyStateRootSignature(newRoot, signature)).toBe(
+      true
+    );
 
     const nextLedgerState = simulator.updateStateRoot(newRoot, signature);
     expect(nextLedgerState.stateRoot).toEqual(newRoot);
@@ -79,6 +81,6 @@ describe("L2 smart contract", () => {
     const msg = new Uint8Array(32).fill(1);
     const signature = simulator.sign(msg, 0);
 
-    expect(pureCircuits.verifySignature(msg, signature)).toBe(true);
+    expect(pureCircuits.verifyStateRootSignature(msg, signature)).toBe(true);
   });
 });

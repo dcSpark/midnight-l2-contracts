@@ -3,8 +3,14 @@ pragma language_version >= 0.16 && <= 0.18;
 import CompactStandardLibrary;
 import Signer;
 
-// exports from Crypto to enable off-chain pk derivation, signing, verification
-export { derivePk, sign, Signature, verifySignature };
+// re-exports & specializations from Crypto to enable off-chain pk derivation, signing, verification
+export { derivePk, Signature };
+export pure circuit signStateRootUpdate(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
+  return sign<Bytes<32>>(msg, sk, nonce);
+}
+export pure circuit verifyStateRootSignature(msg: Bytes<32>, signature: Signature): Boolean {
+  return verifySignature<Bytes<32>>(msg, signature);
+}
 
 // PUBLIC STATE
 // Multisig
@@ -25,7 +31,7 @@ constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
 }
 
 export circuit updateStateRoot(newRoot: Bytes<32>, sig: Signature): [] {
-  assert(verifySignature(newRoot, sig), "Signature verification failed");
+  assert(verifySignature<Bytes<32>>(newRoot, sig), "Signature verification failed");
 
   const pk = disclose(sig).pk;
   const isAllowed: Boolean =

@@ -93,7 +93,11 @@ export class L2Simulator {
     while (true) {
       attempt++;
       const k = BigInt((signerIndex + 1) * 12345 + attempt);
-      const sig = pureCircuits.sign(val, this.signers[signerIndex].sk, k);
+      const sig = pureCircuits.signStateRootUpdate(
+        val,
+        this.signers[signerIndex].sk,
+        k
+      );
       if (sig.s < JUBJUB_SCALAR_FIELD) {
         return sig;
       }
