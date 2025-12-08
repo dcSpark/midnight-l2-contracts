@@ -103,6 +103,7 @@ export circuit withdraw(wi_: WithdrawInfo, sig: Signature): [] {
   send(coin, receiver, coin.value);
 
   // update balance tracking
+  assert(balances.member(receiver.left), "No balance for receiver");
   const oldBalance = balances.lookup(receiver.left);
   assert(oldBalance >= coin.value, "Insufficient balance - shouldn't happen");
   const newBalance = oldBalance - coin.value as Uint<128>;

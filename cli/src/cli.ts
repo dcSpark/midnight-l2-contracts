@@ -47,7 +47,8 @@ You can do one of the following:
   1. Update state root
   2. Display current state root value
   3. Deposit to bridge
-  4. Exit
+  4. Withdraw from bridge
+  5. Exit
 Which would you like to do? `;
 
 const join = async (providers: L2Providers, rli: Interface): Promise<DeployedL2Contract> => {
@@ -131,12 +132,39 @@ const depositToBridge = async (l2Contract: DeployedL2Contract, rli: Interface, w
   }
   let l2ReceiverHex = await rli.question('Enter L2 receiver public key (hex string, e.g. 0xabc...): ');
   const l2Receiver = hexStringToUint8Array(l2ReceiverHex);
-  await api.deposit(l2Contract, amount, l2Receiver);
+  const depositId = await api.deposit(l2Contract, amount, l2Receiver);
+  logger.info(`Deposit successful. Your depositId is: ${depositId}`);
 
   // Get wallet balance after deposit
   const walletStateAfter = await Rx.firstValueFrom(wallet.state());
   const balanceAfter = walletStateAfter.balances[nativeToken()] ?? 0n;
   logger.info(`Wallet balance after deposit: ${balanceAfter.toString()}`);
+};
+
+const withdrawFromBridge = async (l2Contract: DeployedL2Contract, rli: Interface, wallet: Wallet): Promise<void> => {
+  // Get wallet balance before withdraw
+  const walletStateBefore = await Rx.firstValueFrom(wallet.state());
+  const balanceBefore = walletStateBefore.balances[nativeToken()] ?? 0n;
+  logger.info(`Wallet balance before withdraw: ${balanceBefore.toString()}`);
+
+  let depositIdStr = await rli.question('Enter depositId to withdraw: ');
+  let depositId: bigint;
+  try {
+    depositId = BigInt(depositIdStr);
+  } catch {
+    logger.error('Invalid depositId. Please enter a valid integer.');
+    return;
+  }
+  // Use wallet address as l1Receiver
+  const walletState = await Rx.firstValueFrom(wallet.state());
+  const l1Receiver = hexStringToUint8Array(walletState.address);
+
+  await api.withdraw(l2Contract, depositId, l1Receiver);
+
+  // Get wallet balance after withdraw
+  const walletStateAfter = await Rx.firstValueFrom(wallet.state());
+  const balanceAfter = walletStateAfter.balances[nativeToken()] ?? 0n;
+  logger.info(`Wallet balance after withdraw: ${balanceAfter.toString()}`);
 };
 
 const mainLoop = async (providers: L2Providers, rli: Interface, wallet: Wallet): Promise<void> => {
@@ -157,6 +185,9 @@ const mainLoop = async (providers: L2Providers, rli: Interface, wallet: Wallet):
         await depositToBridge(l2Contract, rli, wallet);
         break;
       case '4':
+        await withdrawFromBridge(l2Contract, rli, wallet);
+        break;
+      case '5':
         logger.info('Exiting...');
         return;
       default:

@@ -27,7 +27,7 @@ export class Signer {
     return this.signers[signerIndex].pk;
   }
 
-  public sign(val: Uint8Array, signerIndex: number): L2.Signature {
+  public signStateRootUpdate(val: Uint8Array, signerIndex: number): L2.Signature {
     if (signerIndex < 0 || signerIndex >= this.signers.length) {
       throw new Error('Invalid signer index');
     }
@@ -37,7 +37,23 @@ export class Signer {
     while (true) {
       attempt++;
       const k = BigInt((signerIndex + 1) * 12345 + attempt);
-      const sig = L2.pureCircuits.sign(val, this.signers[signerIndex].sk, k);
+      const sig = L2.pureCircuits.signStateRootUpdate(val, this.signers[signerIndex].sk, k);
+      if (sig.s < JUBJUB_SCALAR_FIELD) {
+        return sig;
+      }
+    }
+  }
+
+  public signWithdraw(wi: any, signerIndex: number): L2.Signature {
+    if (signerIndex < 0 || signerIndex >= this.signers.length) {
+      throw new Error('Invalid signer index');
+    }
+    const JUBJUB_SCALAR_FIELD = 6554484396890773809930967563523245729705921265872317281365359162392183254199n;
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      const k = BigInt((signerIndex + 1) * 12345 + attempt);
+      const sig = L2.pureCircuits.signWithdraw(wi, this.signers[signerIndex].sk, k);
       if (sig.s < JUBJUB_SCALAR_FIELD) {
         return sig;
       }

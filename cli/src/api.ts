@@ -107,7 +107,7 @@ export const updateStateRoot = async (
 ): Promise<FinalizedTxData> => {
   logger.info('Updating state root...');
   const signer = new Signer();
-  const signature = signer.sign(newRoot, 0);
+  const signature = signer.signStateRootUpdate(newRoot, 0);
   const finalizedTxData = await l2Contract.callTx.updateStateRoot(newRoot, signature);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
@@ -117,7 +117,7 @@ export const deposit = async (
   l2Contract: DeployedL2Contract,
   amount: bigint,
   l2Receiver: Uint8Array,
-): Promise<FinalizedTxData> => {
+): Promise<bigint> => {
   logger.info('Depositing nativeToken to L2 contract...');
   const finalizedTxData = await l2Contract.callTx.deposit(
     {
@@ -130,7 +130,7 @@ export const deposit = async (
   logger.info(
     `Deposit transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`,
   );
-  return finalizedTxData.public;
+  return finalizedTxData.private.result;
 };
 
 export const displayStateRoot = async (
@@ -145,6 +145,27 @@ export const displayStateRoot = async (
     logger.info(`Current state root value: ${Buffer.from(stateRootValue).toString('hex')}`);
   }
   return { contractAddress, stateRoot: stateRootValue };
+};
+
+export const withdraw = async (
+  l2Contract: DeployedL2Contract,
+  depositId: bigint,
+  l1Receiver: Uint8Array,
+): Promise<FinalizedTxData> => {
+  logger.info(`Withdrawing depositId=${depositId} to receiver=${Buffer.from(l1Receiver).toString('hex')}`);
+  const withdrawInfo = {
+    depositId,
+    l1Receiver: { bytes: l1Receiver },
+  };
+
+  const signer = new Signer();
+  const signature = signer.signWithdraw(withdrawInfo, 0);
+
+  const finalizedTxData = await l2Contract.callTx.withdraw(withdrawInfo, signature);
+  logger.info(
+    `Withdraw transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`,
+  );
+  return finalizedTxData.public;
 };
 
 export const createWalletAndMidnightProvider = async (wallet: Wallet): Promise<WalletProvider & MidnightProvider> => {
