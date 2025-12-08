@@ -51,7 +51,7 @@ describe("L2 smart contract", () => {
     const newRoot = new Uint8Array(32);
     newRoot.set([0x61, 0x62, 0x63]);
 
-    const signature = simulator.sign(newRoot, 0); // Sign with signer 0
+    const signature = simulator.signStateRootUpdate(newRoot, 0); // Sign with signer 0
     expect(pureCircuits.verifyStateRootSignature(newRoot, signature)).toBe(
       true
     );
@@ -69,7 +69,7 @@ describe("L2 smart contract", () => {
     newRoot.set([0x61, 0x62, 0x63]);
 
     // Create invalid signature (use valid structure but wrong value)
-    const validSig = simulator.sign(newRoot, 0);
+    const validSig = simulator.signStateRootUpdate(newRoot, 0);
     const signature = { ...validSig, s: validSig.s + 1n };
 
     expect(() => simulator.updateStateRoot(newRoot, signature)).toThrow();
@@ -79,7 +79,7 @@ describe("L2 smart contract", () => {
   it("verifies a valid signature", () => {
     const simulator = new L2Simulator();
     const msg = new Uint8Array(32).fill(1);
-    const signature = simulator.sign(msg, 0);
+    const signature = simulator.signStateRootUpdate(msg, 0);
 
     expect(pureCircuits.verifyStateRootSignature(msg, signature)).toBe(true);
   });

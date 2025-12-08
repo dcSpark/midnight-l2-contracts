@@ -23,7 +23,7 @@ import { L2Simulator } from "./L2-simulator.js";
 setNetworkId(NetworkId.Undeployed);
 
 describe("The bridge", () => {
-  it("enables NIGHT deposit", () => {
+  it("enables nativeToken deposit", () => {
     const simulator = new L2Simulator();
 
     const userPubKey = new Uint8Array(32); // TODO: get through witnesses.ts
@@ -34,5 +34,23 @@ describe("The bridge", () => {
 
     const balance = simulator.getBalance(userPubKey);
     expect(balance).toEqual(1_234_000n);
+  });
+
+  it("enables nativeToken withdrawal", () => {
+    const simulator = new L2Simulator();
+
+    const userPubKey = new Uint8Array(32); // TODO: get through witnesses.ts
+    const depositId = simulator.deposit(1_234_000n, new Uint8Array(32));
+    const balance = simulator.getBalance(userPubKey);
+    expect(balance).toEqual(1_234_000n);
+
+    const sig = simulator.signWithdraw(
+      { depositId, l1Receiver: { bytes: userPubKey } },
+      0
+    );
+    simulator.withdraw({ depositId, l1Receiver: { bytes: userPubKey } }, sig);
+
+    const balanceAfter = simulator.getBalance(userPubKey);
+    expect(balanceAfter).toEqual(0n);
   });
 });

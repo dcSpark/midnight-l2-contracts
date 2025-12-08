@@ -11,6 +11,12 @@ export pure circuit signStateRootUpdate(msg: Bytes<32>, sk: Field, nonce: Field)
 export pure circuit verifyStateRootSignature(msg: Bytes<32>, signature: Signature): Boolean {
   return verifySignature<Bytes<32>>(msg, signature);
 }
+export pure circuit signWithdraw(msg: WithdrawInfo, sk: Field, nonce: Field): Signature {
+  return sign<WithdrawInfo>(msg, sk, nonce);
+}
+export pure circuit verifyWithdraw(msg: WithdrawInfo, signature: Signature): Boolean {
+  return verifySignature<WithdrawInfo>(msg, signature);
+}
 
 // PUBLIC STATE
 // Multisig
@@ -18,8 +24,12 @@ export ledger signers: Vector<3, CurvePoint>;
 export ledger stateRoot: Bytes<32>;
 
 // Bridge
-// - balances: how much NIGHT each user has currently deposited (TODO: extend to any tokens)
+// balances: how much nativeToken each user has currently deposited (TODO: extend to any tokens)
 export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;
+
+// we must store received coin info to be able to release coins held by the bridge later
+ledger depositCounter: Uint<64>;
+ledger depositedCoins: Map<Uint<64>, QualifiedCoinInfo>;
 
 witness userPubKey(): ZswapCoinPublicKey;
 
@@ -30,30 +40,34 @@ constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
   stateRoot = disclose(initialStateRoot);
 }
 
+export circuit isSigner(pk_: CurvePoint): Boolean {
+  const pk = disclose(pk_);
+  return
+    (pk == signers[0]) ||
+    (pk == signers[1]) ||
+    (pk == signers[2]);
+}
+
 export circuit updateStateRoot(newRoot: Bytes<32>, sig: Signature): [] {
   assert(verifySignature<Bytes<32>>(newRoot, sig), "Signature verification failed");
 
   const pk = disclose(sig).pk;
-  const isAllowed: Boolean =
-    (pk == signers[0]) ||
-    (pk == signers[1]) ||
-    (pk == signers[2]);
-
-  assert(isAllowed, "Unauthorized signer");
+  assert(isSigner(pk), "Unauthorized signer");
 
   stateRoot = disclose(newRoot);
 }
 
 // BRIDGING FUNCTIONALITY
-export circuit deposit(coin_: CoinInfo, l2_receiver: Bytes<32>): [] {
+// Move native token from L1 to L2: user only needs to deposit and provide their L2 address
+export circuit deposit(coin_: CoinInfo, l2_receiver: Bytes<32>): Uint<64> {
   const coin = disclose(coin_);
+  assert(coin.color == nativeToken(), "Only nativeToken deposits supported for now");
 
   receive(coin);
+  depositedCoins.insertCoin(depositCounter, coin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
+  depositCounter = depositCounter + 1 as Uint<64>;
 
   // TODO: make l2_receiver visible in some way (events?)
-
-  // assert coin is NIGHT for now
-  assert(coin.color == nativeToken(), "Only NIGHT deposits supported for now");
 
   const pk = disclose(userPubKey());
   const amount = disclose(coin.value);
@@ -63,6 +77,43 @@ export circuit deposit(coin_: CoinInfo, l2_receiver: Bytes<32>): [] {
   } else {
     balances.insert(pk, amount);
   }
+
+  return depositCounter - 1 as Uint<64>;
+}
+
+// Move native token from L2 to L1: bridge validator need to sign `withdraw` after observing
+// an appropriate L2 action
+// TODO: safe exit mechanism not requiring validators' approval
+export struct WithdrawInfo {
+  depositId: Uint<64>;
+  l1Receiver: ZswapCoinPublicKey;
+}
+
+export circuit withdraw(wi_: WithdrawInfo, sig: Signature): [] {
+  const wi = disclose(wi_);
+  const receiver = left<ZswapCoinPublicKey, ContractAddress>(wi.l1Receiver);
+
+  assert(verifySignature<WithdrawInfo>(wi, sig), "Signature verification failed");
+  const pk = disclose(sig).pk;
+  assert(isSigner(pk), "Unauthorized signer");
+
+  // send coin to L1 receiver
+  assert(depositedCoins.member(wi.depositId), "Invalid depositId");
+  const coin = depositedCoins.lookup(wi.depositId);
+  send(coin, receiver, coin.value);
+
+  // update balance tracking
+  const oldBalance = balances.lookup(receiver.left);
+  assert(oldBalance >= coin.value, "Insufficient balance - shouldn't happen");
+  const newBalance = oldBalance - coin.value as Uint<128>;
+  if (newBalance == 0 as Uint<128>) {
+    balances.remove(receiver.left);
+  } else {
+    balances.insert(receiver.left, newBalance);
+  }
+
+  // TODO: do we need to work with UTXO model here? Not clear from docs
+  // If we do, probably handle change and more general UTXO management
 }
 
 export circuit getBalance(user_: ZswapCoinPublicKey): Uint<128> {
