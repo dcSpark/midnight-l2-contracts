@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { nativeToken } from '@midnight-ntwrk/ledger';
 import { type Resource } from '@midnight-ntwrk/wallet';
 import { type Wallet } from '@midnight-ntwrk/wallet-api';
 import { promises as fs } from 'node:fs';
@@ -20,6 +21,7 @@ import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface, type Interface } from 'node:readline/promises';
 import { type Logger } from 'pino';
+import * as Rx from 'rxjs';
 import { type DockerComposeEnvironment, type StartedDockerComposeEnvironment } from 'testcontainers';
 import * as api from './api';
 import { type DeployedL2Contract, type L2Providers } from './common-types';
@@ -44,7 +46,8 @@ const MAIN_LOOP_QUESTION = `
 You can do one of the following:
   1. Update state root
   2. Display current state root value
-  3. Exit
+  3. Deposit to bridge
+  4. Exit
 Which would you like to do? `;
 
 const join = async (providers: L2Providers, rli: Interface): Promise<DeployedL2Contract> => {
@@ -90,24 +93,53 @@ const deployOrJoin = async (providers: L2Providers, rli: Interface): Promise<Dep
   }
 };
 
-const update = async (l2Contract: DeployedL2Contract, rli: Interface): Promise<void> => {
-  let hexStr = await rli.question('Enter new state root (hex string, e.g. 0xabc...): ');
-  if (hexStr.startsWith('0x') || hexStr.startsWith('0X')) {
-    hexStr = hexStr.slice(2);
+function hexStringToUint8Array(hex: string): Uint8Array {
+  if (hex.startsWith('0x') || hex.startsWith('0X')) {
+    hex = hex.slice(2);
   }
-  if (hexStr.length > 64) {
-    logger.warn('Input too long, truncating to 32 bytes.');
-    hexStr = hexStr.slice(0, 64);
+  // pad with zeros or slice to 64 chars
+  if (hex.length < 64) {
+    hex = hex.padEnd(64, '0');
+  } else if (hex.length > 64) {
+    hex = hex.slice(0, 64);
   }
-  hexStr = hexStr.padEnd(64, '0');
-  const valueBytes = new Uint8Array(32);
+  const arr = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
-    valueBytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
+    arr[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
-  await api.updateStateRoot(l2Contract, valueBytes);
+  return arr;
+}
+
+const update = async (l2Contract: DeployedL2Contract, rli: Interface): Promise<void> => {
+  let newRootHex = await rli.question('Enter new state root (hex string, e.g. 0xabc...): ');
+  await api.updateStateRoot(l2Contract, hexStringToUint8Array(newRootHex));
 };
 
-const mainLoop = async (providers: L2Providers, rli: Interface): Promise<void> => {
+const depositToBridge = async (l2Contract: DeployedL2Contract, rli: Interface, wallet: Wallet): Promise<void> => {
+  // Get wallet balance before deposit
+  const walletStateBefore = await Rx.firstValueFrom(wallet.state());
+  const balanceBefore = walletStateBefore.balances[nativeToken()] ?? 0n;
+  logger.info(`Wallet balance before deposit: ${balanceBefore.toString()}`);
+
+  let amountStr = await rli.question('Enter amount to deposit (as integer): ');
+  let amount: bigint;
+  try {
+    amount = BigInt(amountStr);
+  } catch {
+    logger.error('Invalid amount. Please enter a valid integer.');
+    return;
+  }
+  let l2ReceiverHex = await rli.question('Enter L2 receiver public key (hex string, e.g. 0xabc...): ');
+  const l2Receiver = hexStringToUint8Array(l2ReceiverHex);
+  await api.deposit(l2Contract, amount, l2Receiver);
+
+  // Get wallet balance after deposit
+  const walletStateAfter = await Rx.firstValueFrom(wallet.state());
+  const balanceAfter = walletStateAfter.balances[nativeToken()] ?? 0n;
+  logger.info(`Wallet balance after deposit: ${balanceAfter.toString()}`);
+};
+
+const mainLoop = async (providers: L2Providers, rli: Interface, wallet: Wallet): Promise<void> => {
   const l2Contract = await deployOrJoin(providers, rli);
   if (l2Contract === null) {
     return;
@@ -122,6 +154,9 @@ const mainLoop = async (providers: L2Providers, rli: Interface): Promise<void> =
         await api.displayStateRoot(providers, l2Contract);
         break;
       case '3':
+        await depositToBridge(l2Contract, rli, wallet);
+        break;
+      case '4':
         logger.info('Exiting...');
         return;
       default:
@@ -195,7 +230,7 @@ export const run = async (config: Config, _logger: Logger, dockerEnv?: DockerCom
   try {
     if (wallet !== null) {
       const providers = await api.configureProviders(wallet, config);
-      await mainLoop(providers, rli);
+      await mainLoop(providers, rli, wallet);
     }
   } catch (e) {
     if (e instanceof Error) {
