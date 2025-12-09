@@ -19,12 +19,15 @@ import {
   QueryContext,
   sampleContractAddress
 } from "@midnight-ntwrk/compact-runtime";
+import { encodeContractAddress } from "@midnight-ntwrk/ledger";
+import { nativeToken } from "@midnight-ntwrk/zswap";
 import {
   Contract,
   type Ledger,
   ledger,
   pureCircuits,
-  type Signature
+  type Signature,
+  WithdrawInfo
 } from "../managed/L2/contract/index.cjs";
 import { type L2PrivateState, witnesses } from "../witnesses.js";
 
@@ -80,18 +83,35 @@ export class L2Simulator {
     return this.signers[signerIndex].pk;
   }
 
-  public sign(val: Uint8Array, signerIndex: number): Signature {
+  public signStateRootUpdate(val: Uint8Array, signerIndex: number): Signature {
+    return this._signWithGrinding(
+      (k) =>
+        pureCircuits.signStateRootUpdate(val, this.signers[signerIndex].sk, k),
+      signerIndex
+    );
+  }
+
+  public signWithdraw(wi: WithdrawInfo, signerIndex: number): Signature {
+    return this._signWithGrinding(
+      (k) => pureCircuits.signWithdraw(wi, this.signers[signerIndex].sk, k),
+      signerIndex
+    );
+  }
+
+  private _signWithGrinding(
+    _signFn: (_: bigint) => Signature,
+    signerIndex: number
+  ): Signature {
     if (signerIndex < 0 || signerIndex >= this.signers.length) {
       throw new Error("Invalid signer index");
     }
-
     const JUBJUB_SCALAR_FIELD =
       6554484396890773809930967563523245729705921265872317281365359162392183254199n;
     let attempt = 0;
     while (true) {
       attempt++;
       const k = BigInt((signerIndex + 1) * 12345 + attempt);
-      const sig = pureCircuits.sign(val, this.signers[signerIndex].sk, k);
+      const sig = _signFn(k);
       if (sig.s < JUBJUB_SCALAR_FIELD) {
         return sig;
       }
@@ -106,5 +126,33 @@ export class L2Simulator {
       signature
     ).context;
     return ledger(this.circuitContext.transactionContext.state);
+  }
+
+  public deposit(amount: bigint, l2_receiver: Uint8Array): bigint {
+    const result = this.contract.impureCircuits.deposit(
+      this.circuitContext,
+      {
+        nonce: new Uint8Array(32),
+        color: encodeContractAddress(nativeToken()),
+        value: amount
+      },
+      l2_receiver
+    );
+    this.circuitContext = result.context;
+    return result.result;
+  }
+
+  public withdraw(withdrawInfo: WithdrawInfo, signature: Signature): void {
+    this.circuitContext = this.contract.impureCircuits.withdraw(
+      this.circuitContext,
+      withdrawInfo,
+      signature
+    ).context;
+  }
+
+  public getBalance(user: Uint8Array): bigint {
+    return this.contract.impureCircuits.getBalance(this.circuitContext, {
+      bytes: user
+    }).result;
   }
 }

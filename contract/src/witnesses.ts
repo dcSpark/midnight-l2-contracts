@@ -12,10 +12,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+import { WitnessContext } from "@midnight-ntwrk/compact-runtime";
+import { Ledger } from "./managed/L2/contract/index.cjs";
 
 // This is how we type an empty object.
 export type L2PrivateState = {
   privateState: number;
 };
 
-export const witnesses = {};
+export const witnesses = {
+  userPubKey(
+    context: WitnessContext<Ledger, L2PrivateState>
+  ): [L2PrivateState, { bytes: Uint8Array }] {
+    return [context.privateState, { bytes: new Uint8Array(32) }];
+  }
+};

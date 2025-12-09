@@ -9,18 +9,18 @@ module Signer {
     s: Field;
   }
 
-  export struct Challenge {
+  export struct Challenge<T> {
     r: CurvePoint;
     pk: CurvePoint;
-    msg: Bytes<32>;
+    msg: T;
   }
 
   export pure circuit derivePk(sk: Field): CurvePoint {
     return ecMulGenerator(sk);
   }
 
-  export pure circuit computeChallenge(r: CurvePoint, pk: CurvePoint, msg: Bytes<32>): Field {
-    const c: Bytes<32> = persistentHash<Challenge>(Challenge {
+  export pure circuit computeChallenge<T>(r: CurvePoint, pk: CurvePoint, msg: T): Field {
+    const c: Bytes<32> = persistentHash<Challenge<T>>(Challenge<T> {
       r: r,
       pk: pk,
       msg: msg
@@ -28,19 +28,19 @@ module Signer {
     return degradeToTransient(c);
   }
 
-  export pure circuit sign(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
+  export pure circuit sign<T>(msg: T, sk: Field, nonce: Field): Signature {
     const pk = derivePk(sk);
 
     const r: CurvePoint = ecMulGenerator(nonce);
-    const c: Field = computeChallenge(r, pk, msg);
+    const c: Field = computeChallenge<T>(r, pk, msg);
     const s: Field = nonce + (c * sk);
 
     return Signature { pk: pk, r: r, s: s };
   }
 
-  export pure circuit verifySignature(msg: Bytes<32>, signature: Signature): Boolean {
+  export pure circuit verifySignature<T>(msg: T, signature: Signature): Boolean {
     const {pk, r, s} = signature;
-    const c: Field = computeChallenge(r, pk, msg);
+    const c: Field = computeChallenge<T>(r, pk, msg);
 
     const lhs: CurvePoint = ecMulGenerator(s);
     const rhs: CurvePoint = ecAdd(r, ecMul(pk, c));

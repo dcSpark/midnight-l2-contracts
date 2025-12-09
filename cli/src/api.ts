@@ -16,7 +16,13 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
-import { type CoinInfo, nativeToken, Transaction, type TransactionId } from '@midnight-ntwrk/ledger';
+import {
+  type CoinInfo,
+  encodeContractAddress,
+  nativeToken,
+  Transaction,
+  type TransactionId,
+} from '@midnight-ntwrk/ledger';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
@@ -101,10 +107,30 @@ export const updateStateRoot = async (
 ): Promise<FinalizedTxData> => {
   logger.info('Updating state root...');
   const signer = new Signer();
-  const signature = signer.sign(newRoot, 0);
+  const signature = signer.signStateRootUpdate(newRoot, 0);
   const finalizedTxData = await l2Contract.callTx.updateStateRoot(newRoot, signature);
   logger.info(`Transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`);
   return finalizedTxData.public;
+};
+
+export const deposit = async (
+  l2Contract: DeployedL2Contract,
+  amount: bigint,
+  l2Receiver: Uint8Array,
+): Promise<bigint> => {
+  logger.info('Depositing nativeToken to L2 contract...');
+  const finalizedTxData = await l2Contract.callTx.deposit(
+    {
+      nonce: new Uint8Array(32),
+      color: encodeContractAddress(nativeToken()),
+      value: amount,
+    },
+    l2Receiver,
+  );
+  logger.info(
+    `Deposit transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`,
+  );
+  return finalizedTxData.private.result;
 };
 
 export const displayStateRoot = async (
@@ -119,6 +145,20 @@ export const displayStateRoot = async (
     logger.info(`Current state root value: ${Buffer.from(stateRootValue).toString('hex')}`);
   }
   return { contractAddress, stateRoot: stateRootValue };
+};
+
+export const withdraw = async (l2Contract: DeployedL2Contract, depositId: bigint): Promise<FinalizedTxData> => {
+  logger.info(`Withdrawing depositId=${depositId}`);
+  const withdrawInfo = { depositId };
+
+  const signer = new Signer();
+  const signature = signer.signWithdraw(withdrawInfo, 0);
+
+  const finalizedTxData = await l2Contract.callTx.withdraw(withdrawInfo, signature);
+  logger.info(
+    `Withdraw transaction ${finalizedTxData.public.txId} added in block ${finalizedTxData.public.blockHeight}`,
+  );
+  return finalizedTxData.public;
 };
 
 export const createWalletAndMidnightProvider = async (wallet: Wallet): Promise<WalletProvider & MidnightProvider> => {

@@ -1,7 +1,7 @@
 services:
   proof-server:
     container_name: 'midnight-proof-server'
-    image: "midnightnetwork/proof-server:4.0.0"
+    image: "meshsdk/midnight-proof-server:1.0.0"
     ports:
       - "6300"
     environment:
