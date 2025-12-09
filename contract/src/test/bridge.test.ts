@@ -44,11 +44,8 @@ describe("The bridge", () => {
     const balance = simulator.getBalance(userPubKey);
     expect(balance).toEqual(1_234_000n);
 
-    const sig = simulator.signWithdraw(
-      { depositId, l1Receiver: { bytes: userPubKey } },
-      0
-    );
-    simulator.withdraw({ depositId, l1Receiver: { bytes: userPubKey } }, sig);
+    const sig = simulator.signWithdraw({ depositId }, 0);
+    simulator.withdraw({ depositId }, sig);
 
     const balanceAfter = simulator.getBalance(userPubKey);
     expect(balanceAfter).toEqual(0n);

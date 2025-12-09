@@ -69,7 +69,7 @@ export circuit deposit(coin_: CoinInfo, l2_receiver: Bytes<32>): Uint<64> {
 
   // TODO: make l2_receiver visible in some way (events?)
 
-  const pk = disclose(userPubKey());
+  const pk = disclose(ownPublicKey());
   const amount = disclose(coin.value);
   if (balances.member(pk)) {
     const old = balances.lookup(pk);
@@ -86,12 +86,11 @@ export circuit deposit(coin_: CoinInfo, l2_receiver: Bytes<32>): Uint<64> {
 // TODO: safe exit mechanism not requiring validators' approval
 export struct WithdrawInfo {
   depositId: Uint<64>;
-  l1Receiver: ZswapCoinPublicKey;
 }
 
 export circuit withdraw(wi_: WithdrawInfo, sig: Signature): [] {
   const wi = disclose(wi_);
-  const receiver = left<ZswapCoinPublicKey, ContractAddress>(wi.l1Receiver);
+  const receiver = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
 
   assert(verifySignature<WithdrawInfo>(wi, sig), "Signature verification failed");
   const pk = disclose(sig).pk;

@@ -147,16 +147,9 @@ export const displayStateRoot = async (
   return { contractAddress, stateRoot: stateRootValue };
 };
 
-export const withdraw = async (
-  l2Contract: DeployedL2Contract,
-  depositId: bigint,
-  l1Receiver: Uint8Array,
-): Promise<FinalizedTxData> => {
-  logger.info(`Withdrawing depositId=${depositId} to receiver=${Buffer.from(l1Receiver).toString('hex')}`);
-  const withdrawInfo = {
-    depositId,
-    l1Receiver: { bytes: l1Receiver },
-  };
+export const withdraw = async (l2Contract: DeployedL2Contract, depositId: bigint): Promise<FinalizedTxData> => {
+  logger.info(`Withdrawing depositId=${depositId}`);
+  const withdrawInfo = { depositId };
 
   const signer = new Signer();
   const signature = signer.signWithdraw(withdrawInfo, 0);

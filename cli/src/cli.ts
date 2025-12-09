@@ -155,11 +155,8 @@ const withdrawFromBridge = async (l2Contract: DeployedL2Contract, rli: Interface
     logger.error('Invalid depositId. Please enter a valid integer.');
     return;
   }
-  // Use wallet address as l1Receiver
-  const walletState = await Rx.firstValueFrom(wallet.state());
-  const l1Receiver = hexStringToUint8Array(walletState.address);
 
-  await api.withdraw(l2Contract, depositId, l1Receiver);
+  await api.withdraw(l2Contract, depositId);
 
   // Get wallet balance after withdraw
   const walletStateAfter = await Rx.firstValueFrom(wallet.state());
