@@ -9,7 +9,7 @@ Midnight L1 smart contracts supporting our Midnight L2.
 ```
 midnight-l2-contracts/
 ├── contract/               # Smart contracts in Compact language
-│   ├── src/L2.compact      # Contract tracking current L2 state root
+│   ├── src/L2.compact      # Contract tracking current L2 state root, supporting bridging, etc.
 │   └── src/test/           # Contract unit tests
 └── cli/                    # Command-line interface
     └── src/                # CLI implementation
@@ -107,6 +107,18 @@ Navigate to CLI directory and build the project:
 ```bash
 cd ../cli && npm run build
 ```
+
+### QUICKSTART: Run the CLI and play with local Midnight network
+
+To start a local Midnight network (node, indexer) with prover and test over it:
+
+```bash
+npm run standalone
+```
+
+The CLI will guide you what to do offering choice between actions. The network gets shut down afterwards.
+
+To start components individually, or connect to testnet etc. follow the more detailed instructions below.
 
 ### Start the Proof Server
 
