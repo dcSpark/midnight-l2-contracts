@@ -15,30 +15,26 @@
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
-  type CoinInfo,
   encodeContractAddress,
   nativeToken,
-  Transaction,
   type TransactionId,
-} from '@midnight-ntwrk/ledger';
+  type ShieldedCoinInfo,
+  type UnprovenTransaction,
+} from '@midnight-ntwrk/ledger-v6';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
-import { getLedgerNetworkId, getZswapNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import {
-  type BalancedTransaction,
-  createBalancedTx,
   type FinalizedTxData,
   type MidnightProvider,
-  type UnbalancedTransaction,
   type WalletProvider,
+  type BalancedProvingRecipe,
 } from '@midnight-ntwrk/midnight-js-types';
-import { type Resource } from '@midnight-ntwrk/wallet';
-import { type Wallet } from '@midnight-ntwrk/wallet-api';
-import { Transaction as ZswapTransaction } from '@midnight-ntwrk/zswap';
+import { type CustomizedShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import { webcrypto } from 'crypto';
 import { Bridge, witnesses } from 'midnight-l2-contracts';
 import * as fs from 'node:fs';
@@ -52,6 +48,13 @@ import { Signer } from './signer';
 let logger: Logger;
 // @ts-expect-error: It's needed to enable WebSocket usage through apollo
 globalThis.WebSocket = WebSocket;
+
+// Type alias for the shielded wallet
+type Wallet = CustomizedShieldedWallet;
+type Resource = { close(): Promise<void> };
+
+// Helper to get native token raw type for balance lookups
+const nativeTokenRaw = () => nativeToken().raw;
 
 export const bridgeContractInstance: BridgeContract = new Bridge.Contract(witnesses);
 
@@ -133,7 +136,7 @@ export const depositNIGHT = async (
   const finalizedTxData = await bridgeContract.callTx.depositNIGHT(
     {
       nonce: new Uint8Array(32),
-      color: encodeContractAddress(nativeToken()),
+      color: encodeContractAddress(nativeTokenRaw()),
       value: amount,
     },
     l2Recipient,
@@ -158,12 +161,12 @@ export const depositNIGHTWithFee = async (
   const finalizedTxData = await bridgeContract.callTx.depositNIGHTWithFee(
     {
       nonce: new Uint8Array(32),
-      color: encodeContractAddress(nativeToken()),
+      color: encodeContractAddress(nativeTokenRaw()),
       value: amount,
     },
     {
       nonce: new Uint8Array(32),
-      color: encodeContractAddress(nativeToken()),
+      color: encodeContractAddress(nativeTokenRaw()),
       value: feeAmount,
     },
     l2Recipient,
@@ -227,22 +230,20 @@ export const getL1ToL2Deposit = async (
 };
 
 export const createWalletAndMidnightProvider = async (wallet: Wallet): Promise<WalletProvider & MidnightProvider> => {
-  const state = await Rx.firstValueFrom(wallet.state());
+  const state = await Rx.firstValueFrom(wallet.state);
   return {
-    coinPublicKey: state.coinPublicKey,
-    encryptionPublicKey: state.encryptionPublicKey,
-    balanceTx(tx: UnbalancedTransaction, newCoins: CoinInfo[]): Promise<BalancedTransaction> {
-      return wallet
-        .balanceTransaction(
-          ZswapTransaction.deserialize(tx.serialize(getLedgerNetworkId()), getZswapNetworkId()),
-          newCoins,
-        )
-        .then((tx) => wallet.proveTransaction(tx))
-        .then((zswapTx) => Transaction.deserialize(zswapTx.serialize(getZswapNetworkId()), getLedgerNetworkId()))
-        .then(createBalancedTx);
+    getCoinPublicKey() {
+      return state.coinPublicKey as any;
     },
-    submitTx(tx: BalancedTransaction): Promise<TransactionId> {
-      return wallet.submitTransaction(tx);
+    getEncryptionPublicKey() {
+      return state.encryptionPublicKey as any;
+    },
+    async balanceTx(tx: UnprovenTransaction, newCoins?: ShieldedCoinInfo[], ttl?: Date): Promise<BalancedProvingRecipe> {
+      throw new Error('balanceTx requires wallet secret keys - needs refactoring for v3 wallet SDK');
+    },
+    async submitTx(tx: any): Promise<TransactionId> {
+      const result = await wallet.submitTransaction(tx);
+      return result.txHash;
     },
   };
 };

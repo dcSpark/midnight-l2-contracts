@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { nativeToken } from '@midnight-ntwrk/ledger';
-import { type Resource } from '@midnight-ntwrk/wallet';
-import { type Wallet } from '@midnight-ntwrk/wallet-api';
+import { nativeToken } from '@midnight-ntwrk/ledger-v6';
+import { type CustomizedShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
@@ -28,6 +27,13 @@ import { type DeployedL2Contract, type L2Providers } from './common-types';
 import { type Config, StandaloneConfig } from './config';
 
 let logger: Logger;
+
+// Type alias for the shielded wallet
+type Wallet = CustomizedShieldedWallet;
+type Resource = { close(): Promise<void> };
+
+// Helper to get native token raw type for balance lookups
+const nativeTokenRaw = () => nativeToken().raw;
 
 /**
  * This seed gives access to tokens minted in the genesis block of a local development node - only
@@ -118,8 +124,8 @@ const update = async (l2Contract: DeployedL2Contract, rli: Interface): Promise<v
 
 const depositToBridge = async (l2Contract: DeployedL2Contract, rli: Interface, wallet: Wallet): Promise<void> => {
   // Get wallet balance before deposit
-  const walletStateBefore = await Rx.firstValueFrom(wallet.state());
-  const balanceBefore = walletStateBefore.balances[nativeToken()] ?? 0n;
+  const walletStateBefore = await Rx.firstValueFrom(wallet.state);
+  const balanceBefore = walletStateBefore.balances[nativeTokenRaw()] ?? 0n;
   logger.info(`Wallet balance before deposit: ${balanceBefore.toString()}`);
 
   let amountStr = await rli.question('Enter amount to deposit (as integer): ');
@@ -136,15 +142,15 @@ const depositToBridge = async (l2Contract: DeployedL2Contract, rli: Interface, w
   logger.info(`Deposit successful. Your depositId is: ${depositId}`);
 
   // Get wallet balance after deposit
-  const walletStateAfter = await Rx.firstValueFrom(wallet.state());
-  const balanceAfter = walletStateAfter.balances[nativeToken()] ?? 0n;
+  const walletStateAfter = await Rx.firstValueFrom(wallet.state);
+  const balanceAfter = walletStateAfter.balances[nativeTokenRaw()] ?? 0n;
   logger.info(`Wallet balance after deposit: ${balanceAfter.toString()}`);
 };
 
 const withdrawFromBridge = async (l2Contract: DeployedL2Contract, rli: Interface, wallet: Wallet): Promise<void> => {
   // Get wallet balance before withdraw
-  const walletStateBefore = await Rx.firstValueFrom(wallet.state());
-  const balanceBefore = walletStateBefore.balances[nativeToken()] ?? 0n;
+  const walletStateBefore = await Rx.firstValueFrom(wallet.state);
+  const balanceBefore = walletStateBefore.balances[nativeTokenRaw()] ?? 0n;
   logger.info(`Wallet balance before withdraw: ${balanceBefore.toString()}`);
 
   let depositIdStr = await rli.question('Enter depositId to withdraw: ');
@@ -159,8 +165,8 @@ const withdrawFromBridge = async (l2Contract: DeployedL2Contract, rli: Interface
   await api.withdraw(l2Contract, depositId);
 
   // Get wallet balance after withdraw
-  const walletStateAfter = await Rx.firstValueFrom(wallet.state());
-  const balanceAfter = walletStateAfter.balances[nativeToken()] ?? 0n;
+  const walletStateAfter = await Rx.firstValueFrom(wallet.state);
+  const balanceAfter = walletStateAfter.balances[nativeTokenRaw()] ?? 0n;
   logger.info(`Wallet balance after withdraw: ${balanceAfter.toString()}`);
 };
 
@@ -277,7 +283,7 @@ export const run = async (config: Config, _logger: Logger, dockerEnv?: DockerCom
     } finally {
       try {
         if (wallet !== null) {
-          await wallet.close();
+          await (wallet as any).close();
         }
       } catch (e) {
         logger.error(`Error closing wallet: ${e}`);

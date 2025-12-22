@@ -24,13 +24,19 @@ import {
 import path from 'path';
 import * as api from '../api';
 import * as Rx from 'rxjs';
-import { nativeToken } from '@midnight-ntwrk/ledger';
+import { nativeToken } from '@midnight-ntwrk/ledger-v6';
 import type { Logger } from 'pino';
-import type { Wallet } from '@midnight-ntwrk/wallet-api';
-import type { Resource } from '@midnight-ntwrk/wallet';
+import { type CustomizedShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import { expect } from 'vitest';
 
 const GENESIS_MINT_WALLET_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
+
+// Type alias for the shielded wallet
+type Wallet = CustomizedShieldedWallet;
+type Resource = { close(): Promise<void> };
+
+// Helper to get native token raw type for balance lookups
+const nativeTokenRaw = () => nativeToken().raw;
 
 export interface TestConfiguration {
   seed: string;
@@ -169,7 +175,7 @@ export class TestEnvironment {
 
   shutdown = async () => {
     if (this.wallet !== undefined) {
-      await this.wallet.close();
+      await (this.wallet as any).close();
     }
     if (this.env !== undefined) {
       this.logger.info('Test containers closing');
@@ -189,8 +195,8 @@ export class TestEnvironment {
       this.testConfig.cacheFileName,
     );
     expect(this.wallet).not.toBeNull();
-    const state = await Rx.firstValueFrom(this.wallet.state());
-    expect(state.balances[nativeToken()].valueOf()).toBeGreaterThan(BigInt(0));
+    const state = await Rx.firstValueFrom(this.wallet.state);
+    expect(state.balances[nativeTokenRaw()].valueOf()).toBeGreaterThan(BigInt(0));
     return this.wallet;
   };
 

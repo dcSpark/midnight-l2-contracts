@@ -29,8 +29,7 @@
  * For unit testing without network deployment, use contract/src/test/*.test.ts
  */
 
-import { type Resource } from '@midnight-ntwrk/wallet';
-import { type Wallet } from '@midnight-ntwrk/wallet-api';
+import { type CustomizedShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import path from 'path';
 import * as fs from 'fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -40,6 +39,10 @@ import { currentDir, contractConfig } from '../config';
 import { createLogger } from '../logger-utils';
 import { TestEnvironment } from './commons';
 
+// Type alias for the shielded wallet
+type Wallet = CustomizedShieldedWallet;
+type Resource = { close(): Promise<void> };
+
 const logDir = path.resolve(currentDir, '..', 'logs', 'tests', `bridge-${new Date().toISOString()}.log`);
 const logger = await createLogger(logDir);
 
@@ -47,18 +50,8 @@ const logger = await createLogger(logDir);
 const bridgeKeysPath = path.resolve(contractConfig.zkConfigPath, '..', 'Bridge', 'keys');
 const hasZkKeys = fs.existsSync(bridgeKeysPath);
 
-// Check if NetworkId is available in the runtime (version compatibility)
-let hasNetworkId = false;
-try {
-  // @ts-expect-error - checking runtime compatibility
-  const runtime = await import('@midnight-ntwrk/compact-runtime');
-  hasNetworkId = runtime.NetworkId !== undefined;
-} catch {
-  hasNetworkId = false;
-}
-
-// Skip tests if ZK keys are not available or runtime is incompatible
-const canRunTests = hasZkKeys && hasNetworkId;
+// Skip tests if ZK keys are not available
+const canRunTests = hasZkKeys;
 const describeWithKeys = canRunTests ? describe : describe.skip;
 
 describeWithKeys('Bridge API', () => {
