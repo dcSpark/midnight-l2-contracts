@@ -1,6 +1,6 @@
 # Midnight L2 contracts
 
-[![Generic badge](https://img.shields.io/badge/Compact%20Compiler-0.25.0-1abc9c.svg)](https://shields.io/) [![Generic badge](https://img.shields.io/badge/TypeScript-5.8.3-blue.svg)](https://shields.io/)
+[![Generic badge](https://img.shields.io/badge/Compact%20Compiler-0.28.0-1abc9c.svg)](https://shields.io/) [![Generic badge](https://img.shields.io/badge/TypeScript-5.8.3-blue.svg)](https://shields.io/)
 
 Midnight L1 smart contracts supporting our Midnight L2.
 
@@ -8,9 +8,11 @@ Midnight L1 smart contracts supporting our Midnight L2.
 
 ```
 midnight-l2-contracts/
+├── compact/                # Compact compiler (git submodule)
 ├── contract/               # Smart contracts in Compact language
-│   ├── src/L2.compact      # Contract tracking current L2 state root, supporting bridging, etc.
-│   └── src/test/           # Contract unit tests
+│   ├── src/Bridge.compact        # Main L1+L2 unified bridge contract
+│   ├── src/L2Simulation.compact  # Simplified L2 contract for testing/simulation only
+│   └── src/test/                 # Contract unit tests
 └── cli/                    # Command-line interface
     └── src/                # CLI implementation
 ```
@@ -43,38 +45,29 @@ If Docker is not found: [Install Docker Desktop](https://docs.docker.com/desktop
 
 ## Setup Instructions
 
-### Install the Compact Compiler
+### Clone the Repository
 
-The Compact compiler converts smart contracts written in the Compact language into executable circuits for zero-knowledge proof generation.
-
-#### Download and install compact compiler
+This project uses a git submodule for the Compact compiler. Clone with:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+git clone --recurse-submodules <repo-url>
 ```
 
-#### Add to your PATH (choose based on your shell)
+If you already cloned without submodules:
 
 ```bash
-source $HOME/.local/bin/env                    # bash/zsh/sh
-source $HOME/.local/bin/env.fish              # fish
+git submodule update --init
 ```
 
-#### Update to the version required by this project (optional)
+### Build the Compact Compiler
 
-```
-compact update 0.25.0
-```
-
-#### Verify installation
+The Compact compiler is included as a submodule pinned to `v.0.28.0-alpha.106+ledger6.2`. Build it with Nix:
 
 ```bash
-compact compile --version
+cd compact && nix build && cd ..
 ```
 
-Expected output: `0.25.0`.
-
-> If command not found: Restart your terminal and try the `source` command again.
+The compiler binary will be available at `./compact/result/bin/compactc`.
 
 ### Install Project Dependencies
 
@@ -239,7 +232,7 @@ Next time you run the DApp:
 
 | Issue                                               | Solution                                                                                                                |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `compact: command not found`                        | Run `source $HOME/.local/bin/env` then `compact compile --version`                                                      |
+| `compact/` folder is empty                          | Run `git submodule update --init`                                                                                       |
 | `connect ECONNREFUSED 127.0.0.1:6300`               | Start proof server: `docker run -p 6300:6300 midnightnetwork/proof-server -- 'midnight-proof-server --network testnet'` |
 | Could not find a working container runtime strategy | Docker isn't running properly. Restart Docker Desktop and try again                                                     |
 | Tests fail with "Cannot find module"                | Compile contract first: `cd contract && npm run compact && npm run build && npm run test`                               |
