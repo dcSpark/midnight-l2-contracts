@@ -18,7 +18,7 @@ import {
   setNetworkId
 } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, expect, it } from "vitest";
-import { L2Simulator } from "./L2-simulator.js";
+import { L2Simulator } from "./L2Simulation-simulator.js";
 
 setNetworkId(NetworkId.Undeployed);
 

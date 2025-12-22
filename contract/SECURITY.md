@@ -71,5 +71,5 @@ $$e = Hash(\text{"Midnight-L2-Sig-v1"}, R, P, message)$$
 ## 4. Implementation Notes
 
 - **Generator ($G$)**: The Midnight Compact runtime uses a specific generator point `ecMulGenerator(1)` which differs from standard Jubjub generators found in libraries like `@noble/curves`. External tooling must be configured with the correct generator coordinates.
-- **Verification Circuit**: The `verifySignature` circuit in `L2.compact` performs the check $s \cdot G = R + e \cdot P$. It relies on the inputs being properly bounded and formatted by the client/simulator.
+- **Verification Circuit**: The `verifySignature` circuit in `L2Simulation.compact` performs the check $s \cdot G = R + e \cdot P$. It relies on the inputs being properly bounded and formatted by the client/simulator.
 

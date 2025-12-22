@@ -6,7 +6,7 @@
 
 ```bash
 cd contract
-PATH="$HOME/.compact/versions/0.26.0/aarch64-darwin:$PATH" ../compact/result/bin/compactc src/L2.compact src/managed/L2
+PATH="$HOME/.compact/versions/0.26.0/aarch64-darwin:$PATH" ../compact/result/bin/compactc src/L2Simulation.compact src/managed/L2Simulation
 PATH="$HOME/.compact/versions/0.26.0/aarch64-darwin:$PATH" ../compact/result/bin/compactc src/Bridge.compact src/managed/Bridge
 ```
 
@@ -19,7 +19,7 @@ cd contract && npm run compact
 
 ```bash
 cd contract
-../compact/result/bin/compactc --skip-zk src/L2.compact src/managed/L2
+../compact/result/bin/compactc --skip-zk src/L2Simulation.compact src/managed/L2Simulation
 ../compact/result/bin/compactc --skip-zk src/Bridge.compact src/managed/Bridge
 ```
 
@@ -34,7 +34,7 @@ cd contract
    - Must add system zkir to PATH for key generation
 
 3. **Output folders:**
-   - `src/managed/L2/` and `src/managed/Bridge/`
+   - `src/managed/L2Simulation/` and `src/managed/Bridge/`
    - `contract/` - TypeScript bindings
    - `zkir/` - Circuit definitions (.zkir)
    - `keys/` - Proving/verifying keys (only with zkir)

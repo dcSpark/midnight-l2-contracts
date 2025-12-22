@@ -16,8 +16,8 @@
 // Export the Bridge contract module (L1 unified contract)
 export * as Bridge from "./managed/Bridge/contract/index.js";
 
-// Export the L2 simulation contract module
-export * as L2 from "./managed/L2/contract/index.js";
+// Export the L2 simulation contract module (for testing only)
+export * as L2Simulation from "./managed/L2Simulation/contract/index.js";
 
 // Export witnesses and protocol types
 export * from "./witnesses";

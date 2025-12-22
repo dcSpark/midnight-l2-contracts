@@ -21,7 +21,7 @@
  * 2. ZK keys generated in the managed contract folders
  * 
  * To generate ZK keys, compile with zkir tool:
- *   cd contract && compact compile src/L2.compact src/managed/L2
+ *   cd contract && compact compile src/L2Simulation.compact src/managed/L2Simulation
  * 
  * The zkir tool generates keys/ folder with .prover and .verifier files.
  * Without these, the tests will fail with "ENOENT: no such file or directory".

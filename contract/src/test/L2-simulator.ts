@@ -28,7 +28,7 @@ import {
   pureCircuits,
   type Signature,
   WithdrawInfo
-} from "../managed/L2/contract/index.js";
+} from "../managed/L2Simulation/contract/index.js";
 import { type L2PrivateState, witnesses } from "../witnesses.js";
 
 export class L2Simulator {

@@ -18,7 +18,7 @@ import {
   setNetworkId
 } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, expect, it } from "vitest";
-import { pureCircuits } from "../managed/L2/contract/index.js";
+import { pureCircuits } from "../managed/L2Simulation/contract/index.js";
 import { L2Simulator } from "./L2-simulator.js";
 
 setNetworkId(NetworkId.Undeployed);
