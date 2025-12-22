@@ -1,126 +1,178 @@
-pragma language_version >= 0.16 && <= 0.18;
+// L2 Contract
+//
+// Simplified L2 state contract for testing:
+// - State root tracking with oracle signature verification
+// - Balance tracking and deposit/withdraw operations
+// - Withdrawal message queue integration
+//
+// This contract is used for L2 simulation tests.
+
+pragma language_version >= 0.16;
 
 import CompactStandardLibrary;
 import Signer;
+import ProtocolTypes prefix PT_;
+import L2Gateway prefix GW_;
+import L2Messenger prefix MSG_;
+import L2MessageQueue prefix MQ_;
 
-// re-exports & specializations from Crypto to enable off-chain pk derivation, signing, verification
+// ============================================================================
+// RE-EXPORTS
+// ============================================================================
+
 export { derivePk, Signature };
-export pure circuit signStateRootUpdate(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
-  return sign<Bytes<32>>(msg, sk, nonce);
-}
-export pure circuit verifyStateRootSignature(msg: Bytes<32>, signature: Signature): Boolean {
-  return verifySignature<Bytes<32>>(msg, signature);
-}
-export pure circuit signWithdraw(msg: WithdrawInfo, sk: Field, nonce: Field): Signature {
-  return sign<WithdrawInfo>(msg, sk, nonce);
-}
-export pure circuit verifyWithdraw(msg: WithdrawInfo, signature: Signature): Boolean {
-  return verifySignature<WithdrawInfo>(msg, signature);
-}
 
-// PUBLIC STATE
-// Multisig
-export ledger signers: Vector<3, CurvePoint>;
-export ledger stateRoot: Bytes<32>;
-
-// Bridge
-// balances: how much nativeToken each user has currently deposited (TODO: extend to any tokens)
-export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;
-
-// we must store received coin info to be able to release coins held by the bridge later
-ledger depositCounter: Uint<64>;
-ledger depositedCoins: Map<Uint<64>, QualifiedCoinInfo>;
-
-witness userPubKey(): ZswapCoinPublicKey;
-
-
-// MULTISIG + STATE ROOT UPDATES
-constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
-  signers = disclose(newSigners);
-  stateRoot = disclose(initialStateRoot);
-}
-
-export circuit isSigner(pk_: CurvePoint): Boolean {
-  const pk = disclose(pk_);
-  return
-    (pk == signers[0]) ||
-    (pk == signers[1]) ||
-    (pk == signers[2]);
-}
-
-export circuit updateStateRoot(newRoot: Bytes<32>, sig: Signature): [] {
-  assert(verifySignature<Bytes<32>>(newRoot, sig), "Signature verification failed");
-
-  const pk = disclose(sig).pk;
-  assert(isSigner(pk), "Unauthorized signer");
-
-  stateRoot = disclose(newRoot);
-}
-
-// BRIDGING FUNCTIONALITY
-// Move native token from L1 to L2: user only needs to deposit and provide their L2 address
-export circuit deposit(coin_: CoinInfo, l2_receiver: Bytes<32>): Uint<64> {
-  const coin = disclose(coin_);
-  assert(coin.color == nativeToken(), "Only nativeToken deposits supported for now");
-
-  receive(coin);
-  depositedCoins.insertCoin(depositCounter, coin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
-  depositCounter = depositCounter + 1 as Uint<64>;
-
-  // TODO: make l2_receiver visible in some way (events?)
-
-  const pk = disclose(ownPublicKey());
-  const amount = disclose(coin.value);
-  if (balances.member(pk)) {
-    const old = balances.lookup(pk);
-    balances.insert(pk, old + amount as Uint<128>);
-  } else {
-    balances.insert(pk, amount);
-  }
-
-  return depositCounter - 1 as Uint<64>;
-}
-
-// Move native token from L2 to L1: bridge validator need to sign `withdraw` after observing
-// an appropriate L2 action
-// TODO: safe exit mechanism not requiring validators' approval
 export struct WithdrawInfo {
   depositId: Uint<64>;
 }
 
-export circuit withdraw(wi_: WithdrawInfo, sig: Signature): [] {
-  const wi = disclose(wi_);
-  const receiver = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-
-  assert(verifySignature<WithdrawInfo>(wi, sig), "Signature verification failed");
-  const pk = disclose(sig).pk;
-  assert(isSigner(pk), "Unauthorized signer");
-
-  // send coin to L1 receiver
-  assert(depositedCoins.member(wi.depositId), "Invalid depositId");
-  const coin = depositedCoins.lookup(wi.depositId);
-  send(coin, receiver, coin.value);
-
-  // update balance tracking
-  assert(balances.member(receiver.left), "No balance for receiver");
-  const oldBalance = balances.lookup(receiver.left);
-  assert(oldBalance >= coin.value, "Insufficient balance - shouldn't happen");
-  const newBalance = oldBalance - coin.value as Uint<128>;
-  if (newBalance == 0 as Uint<128>) {
-    balances.remove(receiver.left);
-  } else {
-    balances.insert(receiver.left, newBalance);
-  }
-
-  // TODO: do we need to work with UTXO model here? Not clear from docs
-  // If we do, probably handle change and more general UTXO management
+export struct WithdrawNIGHTResult {
+  nonce: Uint<64>;
+  messageHash: Bytes<32>;
+  leafHash: Bytes<32>;
 }
 
+// ============================================================================
+// LEDGER STATE
+// ============================================================================
+
+// Oracle signers (3 signers for threshold signatures)
+export sealed ledger signers: Vector<3, CurvePoint>;
+
+// Current L2 state root
+export ledger stateRoot: Bytes<32>;
+
+// ============================================================================
+// CONSTRUCTOR
+// ============================================================================
+
+constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
+  signers = disclose(newSigners);
+  stateRoot = disclose(initialStateRoot);
+  
+  GW_initialize();
+  MSG_initialize();
+  MQ_initialize();
+}
+
+// ============================================================================
+// SIGNING HELPERS (Pure circuits)
+// ============================================================================
+
+export pure circuit signStateRootUpdate(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
+  return sign<Bytes<32>>(msg, sk, nonce);
+}
+
+export pure circuit verifyStateRootSignature(msg: Bytes<32>, signature: Signature): Boolean {
+  return verifySignature<Bytes<32>>(msg, signature);
+}
+
+export pure circuit signWithdraw(msg: WithdrawInfo, sk: Field, nonce: Field): Signature {
+  return sign<WithdrawInfo>(msg, sk, nonce);
+}
+
+export pure circuit verifyWithdraw(msg: WithdrawInfo, signature: Signature): Boolean {
+  return verifySignature<WithdrawInfo>(msg, signature);
+}
+
+// Protocol helpers
+export pure circuit dsL2ToL1Withdraw(): Bytes<32> { return PT_dsL2ToL1Withdraw(); }
+export pure circuit dsL2WithdrawLeaf(): Bytes<32> { return PT_dsL2WithdrawLeaf(); }
+export pure circuit u64ToBytes32LE(x: Uint<64>): Bytes<32> { return PT_u64ToBytes32LE(x); }
+export pure circuit u128ToBytes32LE(x: Uint<128>): Bytes<32> { return PT_u128ToBytes32LE(x); }
+
+export pure circuit hashL2ToL1Withdraw(
+  sender: Bytes<32>,
+  recipient: Bytes<32>,
+  amount: Uint<128>,
+  nonce: Uint<64>
+): Bytes<32> {
+  return MSG_hashWithdrawMessage(sender, recipient, amount, nonce);
+}
+
+export pure circuit hashWithdrawLeaf(messageHash: Bytes<32>): Bytes<32> {
+  return MSG_hashLeaf(messageHash);
+}
+
+export pure circuit hashMerkleNode(left: Bytes<32>, right: Bytes<32>): Bytes<32> {
+  return PT_hashMerkleNode(left, right);
+}
+
+// ============================================================================
+// IMPURE CIRCUITS
+// ============================================================================
+
+// Check if a public key is a registered signer
+export circuit isSigner(pk_: CurvePoint): Boolean {
+  const pk = disclose(pk_);
+  return pk == signers[0] || pk == signers[1] || pk == signers[2];
+}
+
+// Update the state root (requires valid signature from a signer)
+export circuit updateStateRoot(newRoot: Bytes<32>, sig: Signature): [] {
+  const root = disclose(newRoot);
+  assert(verifySignature<Bytes<32>>(root, sig), "Invalid signature");
+  const signerPk = disclose(sig).pk;
+  assert(isSigner(signerPk), "Not a registered signer");
+  stateRoot = root;
+}
+
+// Deposit: receive coin, credit L2 balance, store coin
+export circuit deposit(coin_: ShieldedCoinInfo, l2_receiver: Bytes<32>): Uint<64> {
+  const coin = disclose(coin_);
+  return GW_legacyDeposit(coin);
+}
+
+// Withdraw: verify signature, send coin back to caller
+export circuit withdraw(wi_: WithdrawInfo, sig: Signature): [] {
+  const wi = disclose(wi_);
+  assert(verifySignature<WithdrawInfo>(wi, sig), "Invalid signature");
+  const signerPk = disclose(sig).pk;
+  // Convert to L2Gateway's WithdrawInfo
+  const gwWi = GW_WithdrawInfo { depositId: wi.depositId };
+  GW_legacyWithdraw(gwWi, signerPk);
+}
+
+// Get balance for a user
 export circuit getBalance(user_: ZswapCoinPublicKey): Uint<128> {
   const user = disclose(user_);
-  if (balances.member(user)) {
-    return balances.lookup(user);
-  } else {
-    return 0 as Uint<128>;
-  }
+  return GW_getBalance(user);
+}
+
+// Get the current withdraw root
+export circuit getWithdrawRoot(): Bytes<32> {
+  return MQ_getWithdrawRoot();
+}
+
+// Get the current message count
+export circuit getWithdrawMessageCount(): Uint<64> {
+  return MQ_getMessageCount();
+}
+
+// Withdraw NIGHT via the L2 message queue
+export circuit withdrawNIGHT(recipient_: Bytes<32>, amount_: Uint<128>): WithdrawNIGHTResult {
+  const recipient = disclose(recipient_);
+  const amount = disclose(amount_);
+
+  const senderPk = disclose(ownPublicKey());
+  const senderBytes = senderPk.bytes;
+
+  // Debit balance
+  GW_debit(senderPk, amount);
+
+  // Get nonce (current message count)
+  const nonce = MQ_getMessageCount();
+
+  // Compute hashes
+  const hashes = MSG_computeWithdrawHashes(senderBytes, recipient, amount, nonce);
+
+  // Append to queue
+  const appendedIndex = MQ_appendLeaf(hashes.leafHash);
+  assert(appendedIndex == nonce, "Queue index mismatch");
+
+  return WithdrawNIGHTResult {
+    nonce: nonce,
+    messageHash: hashes.messageHash,
+    leafHash: hashes.leafHash
+  };
 }

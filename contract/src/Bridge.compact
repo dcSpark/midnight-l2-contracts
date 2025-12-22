@@ -1,0 +1,239 @@
+// Bridge Contract (L1 + L2 Unified)
+//
+// Implements L1_CONTRACT_ARCHITECTURE.md for the L1 side.
+// L2 modules remain for local simulation (withdraw message + merkle root building).
+
+pragma language_version >= 0.16;
+
+import CompactStandardLibrary;
+import Signer;
+import ProtocolTypes prefix PT_;
+import L1Rollup prefix L1_;
+import L2Gateway prefix GW_;
+import L2Messenger prefix MSG_;
+import L2MessageQueue prefix MQ_;
+
+// ============================================================================
+// RE-EXPORTS (for off-chain tooling convenience)
+// ============================================================================
+
+export { derivePk, Signature };
+
+export pure circuit signBytes32(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
+  return sign<Bytes<32>>(msg, sk, nonce);
+}
+
+export pure circuit verifyBytes32(msg: Bytes<32>, signature: Signature): Boolean {
+  return verifySignature<Bytes<32>>(msg, signature);
+}
+
+// Protocol helper wrappers
+export pure circuit dsL2ToL1Withdraw(): Bytes<32> { return PT_dsL2ToL1Withdraw(); }
+export pure circuit dsL2WithdrawLeaf(): Bytes<32> { return PT_dsL2WithdrawLeaf(); }
+export pure circuit u64ToBytes32LE(x: Uint<64>): Bytes<32> { return PT_u64ToBytes32LE(x); }
+export pure circuit u128ToBytes32LE(x: Uint<128>): Bytes<32> { return PT_u128ToBytes32LE(x); }
+export pure circuit hashMerkleNode(left: Bytes<32>, right: Bytes<32>): Bytes<32> { return PT_hashMerkleNode(left, right); }
+
+export pure circuit hashL2ToL1Withdraw(
+  sender: Bytes<32>,
+  recipient: Bytes<32>,
+  amount: Uint<128>,
+  nonce: Uint<64>
+): Bytes<32> {
+  return MSG_hashWithdrawMessage(sender, recipient, amount, nonce);
+}
+
+export pure circuit hashWithdrawLeaf(messageHash: Bytes<32>): Bytes<32> {
+  return MSG_hashLeaf(messageHash);
+}
+
+// ============================================================================
+// CONSTRUCTOR
+// ============================================================================
+
+constructor(
+  owner_: Bytes<32>,
+  layer2ChainId_: Uint<64>,
+  rollupId_: Bytes<32>,
+  genesisStateRoot_: Bytes<32>,
+  genesisBatchHash_: Bytes<32>,
+  verifierSet_: Vector<3, CurvePoint>,
+  signatureThreshold_: Uint<8>,
+  initialSequencer_: Bytes<32>,
+  initialFinalizer_: Bytes<32>
+) {
+  L1_initialize(
+    owner_,
+    layer2ChainId_,
+    rollupId_,
+    genesisStateRoot_,
+    genesisBatchHash_,
+    verifierSet_,
+    signatureThreshold_,
+    initialSequencer_,
+    initialFinalizer_
+  );
+
+  // L2 simulation modules
+  GW_initialize();
+  MSG_initialize();
+  MQ_initialize();
+}
+
+// ============================================================================
+// L2: WITHDRAWAL MESSAGE GENERATION (Gateway → Messenger → Queue)
+// ============================================================================
+
+export struct WithdrawNIGHTResult {
+  nonce: Uint<64>;
+  messageHash: Bytes<32>;
+  leafHash: Bytes<32>;
+}
+
+export circuit withdrawNIGHT(recipient_: Bytes<32>, amount_: Uint<128>): WithdrawNIGHTResult {
+  const recipient = disclose(recipient_);
+  const amount = disclose(amount_);
+
+  const senderPk = disclose(ownPublicKey());
+  const senderBytes = senderPk.bytes;
+
+  GW_debit(senderPk, amount);
+
+  const nonce = MQ_getMessageCount();
+
+  const hashes = MSG_computeWithdrawHashes(senderBytes, recipient, amount, nonce);
+
+  const appendedIndex = MQ_appendLeaf(hashes.leafHash);
+  assert(appendedIndex == nonce, "Queue index mismatch");
+
+  return WithdrawNIGHTResult {
+    nonce: nonce,
+    messageHash: hashes.messageHash,
+    leafHash: hashes.leafHash
+  };
+}
+
+export circuit getWithdrawRoot(): Bytes<32> { return MQ_getWithdrawRoot(); }
+export circuit getWithdrawMessageCount(): Uint<64> { return MQ_getMessageCount(); }
+
+// ============================================================================
+// L1: DEPOSIT / WITHDRAW CLAIM / BATCH LIFECYCLE
+// ============================================================================
+
+// Re-export L1 types
+export { L1_DepositResult, L1_WithdrawProof16, L1_BatchPublicDataV1Full, L1_RollupMiscData };
+
+// L1 deposit (no fee coin)
+export circuit depositNIGHT(
+  coin_: ShieldedCoinInfo,
+  l2Recipient_: Bytes<32>,
+  gasLimit_: Uint<64>,
+  timestamp_: Uint<64>
+): L1_DepositResult {
+  return L1_depositNIGHT(
+    disclose(coin_),
+    disclose(l2Recipient_),
+    disclose(gasLimit_),
+    disclose(timestamp_)
+  );
+}
+
+// L1 deposit with fee coin
+export circuit depositNIGHTWithFee(
+  amountCoin_: ShieldedCoinInfo,
+  feeCoin_: ShieldedCoinInfo,
+  l2Recipient_: Bytes<32>,
+  gasLimit_: Uint<64>,
+  timestamp_: Uint<64>
+): L1_DepositResult {
+  return L1_depositNIGHTWithFee(
+    disclose(amountCoin_),
+    disclose(feeCoin_),
+    disclose(l2Recipient_),
+    disclose(gasLimit_),
+    disclose(timestamp_)
+  );
+}
+
+// L1 withdrawal proof relay
+export circuit relayWithdrawNIGHTWithProof(
+  l2Sender_: Bytes<32>,
+  l1Recipient_: Bytes<32>,
+  amount_: Uint<128>,
+  proof_: L1_WithdrawProof16
+): [] {
+  L1_relayWithdrawNIGHTWithProof(
+    disclose(l2Sender_),
+    disclose(l1Recipient_),
+    disclose(amount_),
+    disclose(proof_)
+  );
+}
+
+// Claim a verified withdrawal (partial spend supported)
+export circuit claimL1Withdrawal(depositId_: Uint<64>, amount_: Uint<128>): [] {
+  L1_claimWithdrawal(disclose(depositId_), disclose(amount_));
+}
+
+// Claim fee vault coins (owner or sequencer)
+export circuit claimL1Fees(queueIndex_: Uint<64>, amount_: Uint<128>): [] {
+  L1_claimFees(disclose(queueIndex_), disclose(amount_));
+}
+
+// Batch lifecycle
+export circuit commitBatch(parentBatchHash_: Bytes<32>, batchHash_: Bytes<32>): Uint<64> {
+  return L1_commitBatch(disclose(parentBatchHash_), disclose(batchHash_));
+}
+
+export circuit finalizeBatch(
+  batchPublicData_: L1_BatchPublicDataV1Full,
+  signatures_: Vector<3, Signature>,
+  signerBitmap_: Uint<8>,
+  finalizeTimestamp_: Uint<64>
+): [] {
+  L1_finalizeBatch(
+    disclose(batchPublicData_),
+    signatures_,
+    disclose(signerBitmap_),
+    disclose(finalizeTimestamp_)
+  );
+}
+
+// Admin
+export circuit addSequencer(seq_: Bytes<32>): [] { L1_addSequencer(disclose(seq_)); }
+export circuit removeSequencer(seq_: Bytes<32>): [] { L1_removeSequencer(disclose(seq_)); }
+export circuit addFinalizer(f_: Bytes<32>): [] { L1_addFinalizer(disclose(f_)); }
+export circuit removeFinalizer(f_: Bytes<32>): [] { L1_removeFinalizer(disclose(f_)); }
+export circuit setVerifierSet(newSet_: Vector<3, CurvePoint>): [] { L1_setVerifierSet(disclose(newSet_)); }
+
+// L1 queries
+export circuit lastFinalizedBatchIndex(): Uint<64> { return L1_getLastFinalizedBatchIndex(); }
+export circuit lastCommittedBatchIndex(): Uint<64> { return L1_getLastCommittedBatchIndex(); }
+
+export circuit isBatchFinalized(batchIndex_: Uint<64>): Boolean { return L1_isBatchFinalized(disclose(batchIndex_)); }
+
+export circuit getCommittedBatch(batchIndex_: Uint<64>): Bytes<32> { return L1_getCommittedBatch(disclose(batchIndex_)); }
+export circuit getFinalizedStateRoot(batchIndex_: Uint<64>): Bytes<32> { return L1_getFinalizedStateRoot(disclose(batchIndex_)); }
+export circuit getL1WithdrawRoot(batchIndex_: Uint<64>): Bytes<32> { return L1_getWithdrawRoot(disclose(batchIndex_)); }
+
+export circuit getMessageRollingHash(index_: Uint<64>): Bytes<32> { return L1_getMessageRollingHash(disclose(index_)); }
+export circuit getMessageTimestamp(index_: Uint<64>): Uint<64> { return L1_getMessageTimestamp(disclose(index_)); }
+export circuit getNextCrossDomainMessageIndex(): Uint<64> { return L1_getNextCrossDomainMessageIndex(); }
+export circuit getNextUnfinalizedQueueIndex(): Uint<64> { return L1_getNextUnfinalizedQueueIndex(); }
+
+export circuit getL1ToL2Deposit(queueIndex_: Uint<64>): PT_L1ToL2DepositMessage {
+  return L1_getL1ToL2Deposit(disclose(queueIndex_));
+}
+
+export circuit getLockedNIGHT(): Uint<128> { return L1_getLockedNIGHT(); }
+export circuit getFeeVault(): Uint<128> { return L1_getFeeVault(); }
+
+export circuit getPendingWithdrawal(recipient_: Bytes<32>): Uint<128> {
+  return L1_getPendingWithdrawal(disclose(recipient_));
+}
+
+// Pool helpers (needed to pick a coin id off-chain)
+export circuit hasLiquidityCoin(id_: Uint<64>): Boolean { return L1_hasLiquidityCoin(disclose(id_)); }
+export circuit getLiquidityCoinValue(id_: Uint<64>): Uint<128> { return L1_getLiquidityCoinValue(disclose(id_)); }
+export circuit hasFeeCoin(id_: Uint<64>): Boolean { return L1_hasFeeCoin(disclose(id_)); }
+export circuit getFeeCoinValue(id_: Uint<64>): Uint<128> { return L1_getFeeCoinValue(disclose(id_)); }

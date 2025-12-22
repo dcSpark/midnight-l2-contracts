@@ -1,0 +1,106 @@
+// L2Messenger Module
+//
+// Handles cross-domain message hashing for L2→L1 withdrawals.
+// All circuits are pure - no ledger state mutation.
+//
+// RESPONSIBILITIES:
+// - Compute withdrawal message hashes
+// - Compute Merkle leaf hashes (with domain separation)
+// - Provide nonce from queue index (invariant: nonce == queueIndex)
+//
+// CONSENSUS CRITICAL: Message hashes must match across all implementations.
+
+pragma language_version >= 0.16;
+
+module L2Messenger {
+
+  import CompactStandardLibrary;
+  import ProtocolTypes prefix PT_;
+
+  // ============================================================================
+  // LEDGER STATE (for L1→L2 message relay)
+  // ============================================================================
+
+  // Counter for processed L1→L2 messages
+  export ledger lastProcessedL1Index: Uint<64>;
+
+  // The xDomainMessageSender during message relay
+  export ledger xDomainMessageSender: Bytes<32>;
+
+  // ============================================================================
+  // INITIALIZATION
+  // ============================================================================
+
+  export circuit initialize(): [] {
+    lastProcessedL1Index = 0 as Uint<64>;
+    xDomainMessageSender = pad(32, "");
+  }
+
+  // ============================================================================
+  // HASH COMPUTATION (Pure circuits)
+  // ============================================================================
+
+  // Compute the hash of an L2→L1 withdrawal message
+  export pure circuit hashWithdrawMessage(
+    sender: Bytes<32>,
+    recipient: Bytes<32>,
+    amount: Uint<128>,
+    nonce: Uint<64>
+  ): Bytes<32> {
+    const msg = PT_L2ToL1WithdrawMessage {
+      sender: sender,
+      recipient: recipient,
+      amount: amount,
+      nonce: nonce
+    };
+    return PT_hashL2ToL1Withdraw(msg);
+  }
+
+  // Compute the Merkle leaf hash (with domain separation)
+  export pure circuit hashLeaf(messageHash: Bytes<32>): Bytes<32> {
+    return PT_hashWithdrawLeaf(messageHash);
+  }
+
+  // Result of computing withdrawal hashes
+  export struct WithdrawHashes {
+    messageHash: Bytes<32>;
+    leafHash: Bytes<32>;
+  }
+
+  // Compute both hashes in one call
+  export pure circuit computeWithdrawHashes(
+    sender: Bytes<32>,
+    recipient: Bytes<32>,
+    amount: Uint<128>,
+    nonce: Uint<64>
+  ): WithdrawHashes {
+    const messageHash = hashWithdrawMessage(sender, recipient, amount, nonce);
+    const leafHash = hashLeaf(messageHash);
+    return WithdrawHashes {
+      messageHash: messageHash,
+      leafHash: leafHash
+    };
+  }
+
+  // ============================================================================
+  // L1→L2 MESSAGE RELAY (Phase 5)
+  // ============================================================================
+
+  export circuit setXDomainSender(sender: Bytes<32>): [] {
+    xDomainMessageSender = sender;
+  }
+
+  export circuit clearXDomainSender(): [] {
+    xDomainMessageSender = pad(32, "");
+  }
+
+  export circuit getXDomainSender(): Bytes<32> {
+    return xDomainMessageSender;
+  }
+
+  export circuit advanceL1Index(newIndex: Uint<64>): [] {
+    lastProcessedL1Index = newIndex;
+  }
+}
+
+

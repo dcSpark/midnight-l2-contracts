@@ -13,5 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export * as L2 from "./managed/L2/contract/index.cjs";
+// Export the Bridge contract module
+export * as Bridge from "./managed/Bridge/contract/index.js";
+
+// Backwards compatibility alias (L2 -> Bridge)
+export * as L2 from "./managed/Bridge/contract/index.js";
+
+// Export witnesses and protocol types
 export * from "./witnesses";
+export * from "./protocol-types";

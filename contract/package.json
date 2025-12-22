@@ -16,10 +16,12 @@
     }
   },
   "scripts": {
-    "compact": "compact compile src/L2.compact src/managed/L2",
+    "compact:bridge": "../compact/result/bin/compactc src/Bridge.compact src/managed/Bridge",
+    "compact:l2": "../compact/result/bin/compactc src/L2.compact src/managed/L2",
+    "compact": "npm run compact:bridge && npm run compact:l2",
     "test": "vitest run",
     "test:compile": "npm run compact && vitest run",
-    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/L2.compact ./dist",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/Bridge.compact ./dist",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }

@@ -1,0 +1,63 @@
+{
+  "version": "1.0",
+  "description": "Golden test vectors for Protocol V1. DO NOT MODIFY unless making a consensus-breaking change.",
+  "generatedAt": "2025-12-19",
+  "encoding": {
+    "integers": "32-byte little-endian",
+    "domainSeparators": "32-byte zero-padded ASCII",
+    "hashFunction": "sha256(concat(bytes32 chunks))"
+  },
+  "domainSeparators": {
+    "l1ToL2Deposit": "mdn:l1l2:deposit",
+    "l2ToL1Withdraw": "mdn:l2l1:wdraw",
+    "l1QueueRolling": "mdn:l1q:rolling",
+    "l2WithdrawLeaf": "mdn:l2w:leaf",
+    "merkleNode": "mdn:merkle:node"
+  },
+  "zeroHashes": {
+    "level0": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b",
+    "level1": "db56114e00fdd4c1f85c892bf35ac9a89289aaecb1ebd0a96cde606a748b5d71",
+    "level2": "c78009fdf07fc56a11f122370658a353aaa542ed63e44c4bc15ff4cd105ab33c",
+    "level3": "536d98837f2dd165a55d5eeae91485954472d56f246df256bf3cae19352a123c",
+    "level4": "9efde052aa15429fae05bad4d0b1d7c64da64d03d7a1854a588c2cb8430c0d30"
+  },
+  "vectors": {
+    "withdrawal1": {
+      "input": {
+        "sender": "616c69636500000000000000000000000000000000000000000000000000000",
+        "senderAscii": "alice",
+        "recipient": "626f6200000000000000000000000000000000000000000000000000000000",
+        "recipientAscii": "bob",
+        "amount": "1000000000000000000",
+        "nonce": "1"
+      },
+      "expectedHash": "dd6f90565a8836e42db825008b69d8724ccaeba75976aca34d8a3f0e4be64ccc"
+    },
+    "deposit1": {
+      "input": {
+        "sender": "0000000000000000000000000000000000000000000000000000000000000000",
+        "senderAscii": "",
+        "recipient": "616c69636500000000000000000000000000000000000000000000000000000",
+        "recipientAscii": "alice",
+        "amount": "1000000000000000000",
+        "nonce": "42",
+        "gasLimit": "100000",
+        "dataHash": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedHash": "e2089c3ddcdace28b6aacba8d8a92567c5c96a42252a7a26cefd1acfdae599e4"
+    },
+    "rollingHash1": {
+      "description": "Initial rolling hash after deposit1",
+      "prevHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "leafHash": "e2089c3ddcdace28b6aacba8d8a92567c5c96a42252a7a26cefd1acfdae599e4",
+      "expectedHash": "63cd510cb8d3608e2fd452238945d81c136b49a5855b23eb959fcee6e0ce8e80"
+    },
+    "withdrawLeaf1": {
+      "description": "Withdrawal leaf from withdrawal1",
+      "messageHash": "dd6f90565a8836e42db825008b69d8724ccaeba75976aca34d8a3f0e4be64ccc",
+      "expectedLeafHash": "f81a08ee2b411732de65da6753f7986d1222e4c08f3b341e49c23cbc639ebe27"
+    }
+  }
+}
+
+

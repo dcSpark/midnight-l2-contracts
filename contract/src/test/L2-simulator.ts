@@ -14,9 +14,9 @@
 // limitations under the License.
 import {
   type CircuitContext,
-  constructorContext,
+  createCircuitContext,
+  createConstructorContext,
   type CurvePoint,
-  QueryContext,
   sampleContractAddress
 } from "@midnight-ntwrk/compact-runtime";
 import { encodeContractAddress } from "@midnight-ntwrk/ledger";
@@ -28,7 +28,7 @@ import {
   pureCircuits,
   type Signature,
   WithdrawInfo
-} from "../managed/L2/contract/index.cjs";
+} from "../managed/L2/contract/index.js";
 import { type L2PrivateState, witnesses } from "../witnesses.js";
 
 export class L2Simulator {
@@ -53,23 +53,22 @@ export class L2Simulator {
       currentContractState,
       currentZswapLocalState
     } = this.contract.initialState(
-      constructorContext({ privateState: 0 }, "0".repeat(64)),
+      createConstructorContext({ privateState: 0 }, "0".repeat(64)),
       this.signers.map((s) => s.pk),
       new Uint8Array(32)
     );
-    this.circuitContext = {
-      currentPrivateState,
-      currentZswapLocalState,
-      originalState: currentContractState,
-      transactionContext: new QueryContext(
-        currentContractState.data,
-        sampleContractAddress()
-      )
-    };
+
+    // Use createCircuitContext for the new runtime API
+    this.circuitContext = createCircuitContext(
+      sampleContractAddress(),
+      currentZswapLocalState.coinPublicKey,
+      currentContractState.data,
+      currentPrivateState
+    );
   }
 
   public getLedger(): Ledger {
-    return ledger(this.circuitContext.transactionContext.state);
+    return ledger(this.circuitContext.currentQueryContext.state);
   }
 
   public getPrivateState(): L2PrivateState {
@@ -125,7 +124,7 @@ export class L2Simulator {
       val,
       signature
     ).context;
-    return ledger(this.circuitContext.transactionContext.state);
+    return ledger(this.circuitContext.currentQueryContext.state);
   }
 
   public deposit(amount: bigint, l2_receiver: Uint8Array): bigint {
