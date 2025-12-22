@@ -28,6 +28,11 @@ export default defineConfig({
     include: ['**/*.test.ts'],
     exclude: ['node_modules'],
     root: '.',
+    // Run tests sequentially to avoid Docker container conflicts
+    pool: 'forks',
+    poolOptions: {
+      forks: { singleFork: true }
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

@@ -13,20 +13,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * L2 API Integration Tests
+ * 
+ * These tests require:
+ * 1. Docker running for testcontainers
+ * 2. ZK keys generated in the managed contract folders
+ * 
+ * To generate ZK keys, compile with zkir tool:
+ *   cd contract && compact compile src/L2.compact src/managed/L2
+ * 
+ * The zkir tool generates keys/ folder with .prover and .verifier files.
+ * Without these, the tests will fail with "ENOENT: no such file or directory".
+ * 
+ * For unit testing without network deployment, use contract/src/test/*.test.ts
+ */
+
 import { type Resource } from '@midnight-ntwrk/wallet';
 import { type Wallet } from '@midnight-ntwrk/wallet-api';
 import path from 'path';
+import * as fs from 'fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as api from '../api';
 import { type L2Providers } from '../common-types';
-import { currentDir } from '../config';
+import { currentDir, contractConfig } from '../config';
 import { createLogger } from '../logger-utils';
 import { TestEnvironment } from './commons';
 
 const logDir = path.resolve(currentDir, '..', 'logs', 'tests', `${new Date().toISOString()}.log`);
 const logger = await createLogger(logDir);
 
-describe('API', () => {
+// Check if keys exist for the L2 contract
+const l2KeysPath = path.resolve(contractConfig.zkConfigPath, 'keys');
+const hasZkKeys = fs.existsSync(l2KeysPath);
+
+// Check if NetworkId is available in the runtime (version compatibility)
+let hasNetworkId = false;
+try {
+  // @ts-expect-error - checking runtime compatibility
+  const runtime = await import('@midnight-ntwrk/compact-runtime');
+  hasNetworkId = runtime.NetworkId !== undefined;
+} catch {
+  hasNetworkId = false;
+}
+
+// Skip tests if ZK keys are not available or runtime is incompatible
+const canRunTests = hasZkKeys && hasNetworkId;
+const describeWithKeys = canRunTests ? describe : describe.skip;
+
+describeWithKeys('API', () => {
   let testEnvironment: TestEnvironment;
   let wallet: Wallet & Resource;
   let providers: L2Providers;
