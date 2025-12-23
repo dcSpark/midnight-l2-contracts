@@ -26,14 +26,11 @@ import * as api from './api';
 import { type DeployedL2Contract, type L2Providers } from './common-types';
 import { type Config, StandaloneConfig } from './config';
 
-let logger: Logger;
-
-// Type alias for the shielded wallet
+// Type aliases for ShieldedWallet
 type Wallet = CustomizedShieldedWallet;
 type Resource = { close(): Promise<void> };
 
-// Helper to get native token raw type for balance lookups
-const nativeTokenRaw = () => nativeToken().raw;
+let logger: Logger;
 
 /**
  * This seed gives access to tokens minted in the genesis block of a local development node - only
@@ -118,17 +115,17 @@ function hexStringToUint8Array(hex: string): Uint8Array {
 }
 
 const update = async (l2Contract: DeployedL2Contract, rli: Interface): Promise<void> => {
-  let newRootHex = await rli.question('Enter new state root (hex string, e.g. 0xabc...): ');
+  const newRootHex = await rli.question('Enter new state root (hex string, e.g. 0xabc...): ');
   await api.updateStateRoot(l2Contract, hexStringToUint8Array(newRootHex));
 };
 
 const depositToBridge = async (l2Contract: DeployedL2Contract, rli: Interface, wallet: Wallet): Promise<void> => {
   // Get wallet balance before deposit
   const walletStateBefore = await Rx.firstValueFrom(wallet.state);
-  const balanceBefore = walletStateBefore.balances[nativeTokenRaw()] ?? 0n;
-  logger.info(`Wallet balance before deposit: ${balanceBefore.toString()}`);
+  const balanceBefore = walletStateBefore.balances[nativeToken().raw] ?? 0n;
+  logger.info(`Wallet balance before deposit: ${balanceBefore}`);
 
-  let amountStr = await rli.question('Enter amount to deposit (as integer): ');
+  const amountStr = await rli.question('Enter amount to deposit (as integer): ');
   let amount: bigint;
   try {
     amount = BigInt(amountStr);
@@ -136,24 +133,24 @@ const depositToBridge = async (l2Contract: DeployedL2Contract, rli: Interface, w
     logger.error('Invalid amount. Please enter a valid integer.');
     return;
   }
-  let l2ReceiverHex = await rli.question('Enter L2 receiver public key (hex string, e.g. 0xabc...): ');
+  const l2ReceiverHex = await rli.question('Enter L2 receiver public key (hex string, e.g. 0xabc...): ');
   const l2Receiver = hexStringToUint8Array(l2ReceiverHex);
   const depositId = await api.deposit(l2Contract, amount, l2Receiver);
   logger.info(`Deposit successful. Your depositId is: ${depositId}`);
 
   // Get wallet balance after deposit
   const walletStateAfter = await Rx.firstValueFrom(wallet.state);
-  const balanceAfter = walletStateAfter.balances[nativeTokenRaw()] ?? 0n;
-  logger.info(`Wallet balance after deposit: ${balanceAfter.toString()}`);
+  const balanceAfter = walletStateAfter.balances[nativeToken().raw] ?? 0n;
+  logger.info(`Wallet balance after deposit: ${balanceAfter}`);
 };
 
 const withdrawFromBridge = async (l2Contract: DeployedL2Contract, rli: Interface, wallet: Wallet): Promise<void> => {
   // Get wallet balance before withdraw
   const walletStateBefore = await Rx.firstValueFrom(wallet.state);
-  const balanceBefore = walletStateBefore.balances[nativeTokenRaw()] ?? 0n;
-  logger.info(`Wallet balance before withdraw: ${balanceBefore.toString()}`);
+  const balanceBefore = walletStateBefore.balances[nativeToken().raw] ?? 0n;
+  logger.info(`Wallet balance before withdraw: ${balanceBefore}`);
 
-  let depositIdStr = await rli.question('Enter depositId to withdraw: ');
+  const depositIdStr = await rli.question('Enter depositId to withdraw: ');
   let depositId: bigint;
   try {
     depositId = BigInt(depositIdStr);
@@ -166,8 +163,8 @@ const withdrawFromBridge = async (l2Contract: DeployedL2Contract, rli: Interface
 
   // Get wallet balance after withdraw
   const walletStateAfter = await Rx.firstValueFrom(wallet.state);
-  const balanceAfter = walletStateAfter.balances[nativeTokenRaw()] ?? 0n;
-  logger.info(`Wallet balance after withdraw: ${balanceAfter.toString()}`);
+  const balanceAfter = walletStateAfter.balances[nativeToken().raw] ?? 0n;
+  logger.info(`Wallet balance after withdraw: ${balanceAfter}`);
 };
 
 const mainLoop = async (providers: L2Providers, rli: Interface, wallet: Wallet): Promise<void> => {
@@ -283,7 +280,7 @@ export const run = async (config: Config, _logger: Logger, dockerEnv?: DockerCom
     } finally {
       try {
         if (wallet !== null) {
-          await (wallet as any).close();
+          await wallet.close();
         }
       } catch (e) {
         logger.error(`Error closing wallet: ${e}`);

@@ -15,6 +15,10 @@
 
 import path from 'node:path';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
+import { NetworkId as NetworkIdNS } from '@midnight-ntwrk/wallet-sdk-abstractions';
+
+// Use the NetworkId values from the namespace
+const NetworkIdValues = NetworkIdNS.NetworkId;
 export const currentDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
 export const contractConfig = {
@@ -34,21 +38,22 @@ export class TestnetLocalConfig implements Config {
   logDir = path.resolve(currentDir, '..', 'logs', 'testnet-local', `${new Date().toISOString()}.log`);
   indexer = 'http://127.0.0.1:8088/api/v1/graphql';
   indexerWS = 'ws://127.0.0.1:8088/api/v1/graphql/ws';
-  node = 'http://127.0.0.1:9944';
+  node = 'ws://127.0.0.1:9944';
   proofServer = 'http://127.0.0.1:6300';
   constructor() {
-    setNetworkId('testnet');
+    setNetworkId(NetworkIdValues.TestNet);
   }
 }
 
 export class StandaloneConfig implements Config {
   logDir = path.resolve(currentDir, '..', 'logs', 'standalone', `${new Date().toISOString()}.log`);
-  indexer = 'http://127.0.0.1:8088/api/v1/graphql';
-  indexerWS = 'ws://127.0.0.1:8088/api/v1/graphql/ws';
-  node = 'http://127.0.0.1:9944';
+  // Using v3 API for indexer (matches midnight-wallet SDK)
+  indexer = 'http://127.0.0.1:8088/api/v3/graphql';
+  indexerWS = 'ws://127.0.0.1:8088/api/v3/graphql/ws';
+  node = 'ws://127.0.0.1:9944';
   proofServer = 'http://127.0.0.1:6300';
   constructor() {
-    setNetworkId('undeployed');
+    setNetworkId(NetworkIdValues.Undeployed);
   }
 }
 
@@ -56,9 +61,9 @@ export class TestnetRemoteConfig implements Config {
   logDir = path.resolve(currentDir, '..', 'logs', 'testnet-remote', `${new Date().toISOString()}.log`);
   indexer = 'https://indexer.testnet-02.midnight.network/api/v1/graphql';
   indexerWS = 'wss://indexer.testnet-02.midnight.network/api/v1/graphql/ws';
-  node = 'https://rpc.testnet-02.midnight.network';
+  node = 'wss://rpc.testnet-02.midnight.network';
   proofServer = 'http://127.0.0.1:6300';
   constructor() {
-    setNetworkId('testnet');
+    setNetworkId(NetworkIdValues.TestNet);
   }
 }

@@ -39,7 +39,7 @@ import { currentDir, contractConfig } from '../config';
 import { createLogger } from '../logger-utils';
 import { TestEnvironment } from './commons';
 
-// Type alias for the shielded wallet
+// Type aliases for ShieldedWallet
 type Wallet = CustomizedShieldedWallet;
 type Resource = { close(): Promise<void> };
 

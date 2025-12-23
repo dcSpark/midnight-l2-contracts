@@ -23,20 +23,17 @@ import {
 } from 'testcontainers';
 import path from 'path';
 import * as api from '../api';
-import * as Rx from 'rxjs';
 import { nativeToken } from '@midnight-ntwrk/ledger-v6';
 import type { Logger } from 'pino';
 import { type CustomizedShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import { expect } from 'vitest';
 
-const GENESIS_MINT_WALLET_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
-
-// Type alias for the shielded wallet
+// Type aliases for ShieldedWallet
 type Wallet = CustomizedShieldedWallet;
 type Resource = { close(): Promise<void> };
 
-// Helper to get native token raw type for balance lookups
-const nativeTokenRaw = () => nativeToken().raw;
+// Genesis-funded wallet seed (seeds 0x01-0x04 are funded in dev preset)
+const GENESIS_MINT_WALLET_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 
 export interface TestConfiguration {
   seed: string;
@@ -136,7 +133,7 @@ export class TestEnvironment {
           'midnight-proof-server',
           Wait.forLogMessage('Actix runtime found; starting in Actix runtime', 1),
         )
-        .withWaitStrategy('midnight-indexer', Wait.forLogMessage(/starting indexing/, 1));
+        .withWaitStrategy('midnight-indexer', Wait.forLogMessage(/block indexed/, 1));
       this.env = await this.dockerEnv.up();
 
       this.testConfig.dappConfig = {
@@ -165,17 +162,16 @@ export class TestEnvironment {
     return mappedUrl.toString().replace(/\/+$/, '');
   };
 
-  static getProofServerContainer = async (env: string) =>
-    await new GenericContainer('midnightnetwork/proof-server:4.0.0')
+  static getProofServerContainer = async (_env: string) =>
+    await new GenericContainer('meshsdk/midnight-proof-server:1.0.0')
       .withExposedPorts(6300)
-      .withCommand([`midnight-proof-server --network ${env}`])
       .withEnvironment({ RUST_BACKTRACE: 'full' })
       .withWaitStrategy(Wait.forLogMessage('Actix runtime found; starting in Actix runtime', 1))
       .start();
 
   shutdown = async () => {
     if (this.wallet !== undefined) {
-      await (this.wallet as any).close();
+      await this.wallet.close();
     }
     if (this.env !== undefined) {
       this.logger.info('Test containers closing');
@@ -188,15 +184,22 @@ export class TestEnvironment {
   };
 
   getWallet = async () => {
-    this.logger.info('Setting up wallet');
+    this.logger.info('Setting up shielded wallet');
     this.wallet = await api.buildWalletAndWaitForFunds(
       this.testConfig.dappConfig,
       this.testConfig.seed,
       this.testConfig.cacheFileName,
     );
     expect(this.wallet).not.toBeNull();
-    const state = await Rx.firstValueFrom(this.wallet.state);
-    expect(state.balances[nativeTokenRaw()].valueOf()).toBeGreaterThan(BigInt(0));
+    
+    // Wait for wallet to sync
+    this.logger.info('Waiting for wallet to sync...');
+    const state = await api.waitForSync(this.wallet);
+    
+    // Log balance
+    const balance = state.balances[nativeToken().raw] ?? 0n;
+    this.logger.info(`Wallet synced. Shielded balance: ${balance}`);
+    
     return this.wallet;
   };
 
