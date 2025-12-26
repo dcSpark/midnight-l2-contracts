@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { type Config, StandaloneConfig, currentDir, TestnetRemoteConfig } from '../config';
+import { type Config, StandaloneConfig, currentDir, TestnetRemoteConfig, PreviewConfig } from '../config';
 import {
   DockerComposeEnvironment,
   GenericContainer,
@@ -84,6 +84,11 @@ export function parseArgs(required: string[]): TestConfiguration {
       case 'testnet':
         cfg = new TestnetRemoteConfig();
         psMode = 'testnet';
+        cacheFileName = `${seed.substring(0, 7)}-${psMode}.state`;
+        break;
+      case 'preview':
+        cfg = new PreviewConfig();
+        psMode = 'preview';
         cacheFileName = `${seed.substring(0, 7)}-${psMode}.state`;
         break;
       default:
@@ -162,12 +167,17 @@ export class TestEnvironment {
     return mappedUrl.toString().replace(/\/+$/, '');
   };
 
-  static getProofServerContainer = async (_env: string) =>
-    await new GenericContainer('meshsdk/midnight-proof-server:1.0.0')
+  static getProofServerContainer = async (env: string) => {
+    // Use the proof server image aligned with ledger 6.1.x
+    const image = 'midnightnetwork/proof-server:6.1.0-alpha.6';
+    const networkArg = env === 'preview' ? 'preview' : 'testnet';
+    return await new GenericContainer(image)
       .withExposedPorts(6300)
       .withEnvironment({ RUST_BACKTRACE: 'full' })
+      .withCommand(['midnight-proof-server', '--network', networkArg])
       .withWaitStrategy(Wait.forLogMessage('Actix runtime found; starting in Actix runtime', 1))
       .start();
+  };
 
   shutdown = async () => {
     if (this.wallet !== undefined) {

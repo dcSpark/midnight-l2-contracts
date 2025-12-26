@@ -67,3 +67,15 @@ export class TestnetRemoteConfig implements Config {
     setNetworkId(NetworkIdValues.TestNet);
   }
 }
+
+// Preview Testnet config - aligned with ledger 6.1.x npm packages
+export class PreviewConfig implements Config {
+  logDir = path.resolve(currentDir, '..', 'logs', 'preview', `${new Date().toISOString()}.log`);
+  indexer = 'https://indexer.preview.midnight.network/api/v1/graphql';
+  indexerWS = 'wss://indexer.preview.midnight.network/api/v1/graphql/ws';
+  node = 'wss://rpc.preview.midnight.network';
+  proofServer = 'http://127.0.0.1:6300';
+  constructor() {
+    setNetworkId(NetworkIdValues.TestNet);
+  }
+}
