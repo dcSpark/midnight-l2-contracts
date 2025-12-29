@@ -19,8 +19,8 @@ import {
   type CurvePoint,
   sampleContractAddress
 } from "@midnight-ntwrk/compact-runtime";
-import { encodeContractAddress } from "@midnight-ntwrk/ledger";
-import { nativeToken } from "@midnight-ntwrk/zswap";
+import { encodeContractAddress, nativeToken } from "@midnight-ntwrk/ledger-v6";
+
 import {
   Contract,
   type Ledger,

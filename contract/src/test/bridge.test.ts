@@ -13,14 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  NetworkId,
-  setNetworkId
-} from "@midnight-ntwrk/midnight-js-network-id";
+import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, expect, it } from "vitest";
 import { L2Simulator } from "./L2Simulation-simulator.js";
 
-setNetworkId(NetworkId.Undeployed);
+setNetworkId("undeployed");
 
 describe("The bridge", () => {
   it("enables nativeToken deposit", () => {

@@ -26,13 +26,10 @@
  * These tests verify the contract behavior at the logic level.
  */
 
-import {
-  NetworkId,
-  setNetworkId
-} from "@midnight-ntwrk/midnight-js-network-id";
+import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, expect, it, beforeEach } from "vitest";
 
-setNetworkId(NetworkId.Undeployed);
+setNetworkId("undeployed");
 
 /**
  * Helper: Generate index bits for Merkle tree operations
@@ -458,4 +455,3 @@ describe("Witness Implementation Requirements", () => {
     expect(bits.slice(3).every(b => b === false)).toBe(true);
   });
 });
-

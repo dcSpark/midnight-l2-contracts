@@ -13,15 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  NetworkId,
-  setNetworkId
-} from "@midnight-ntwrk/midnight-js-network-id";
+import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, expect, it } from "vitest";
 import { pureCircuits } from "../managed/L2Simulation/contract/index.js";
 import { L2Simulator } from "./L2-simulator.js";
 
-setNetworkId(NetworkId.Undeployed);
+setNetworkId("undeployed");
 
 describe("L2 smart contract", () => {
   it("generates initial ledger state deterministically", () => {

@@ -18,12 +18,13 @@ services:
   indexer:
     container_name: 'midnight-indexer'
     # Using midnightnetwork pubsub-indexer aligned with ledger 6.1.x
-    image: 'midnightnetwork/midnight-pubsub-indexer:2.3.0'
+    image: 'midnightntwrk/indexer-standalone:3.0.0-alpha.1'
     ports:
       - '8088'
     environment:
-      INDEXER_NODE_URL: 'ws://node:9944'
-      INDEXER_NETWORK_ID: 'undeployed'
+      RUST_LOG: "indexer=info,chain_indexer=info,indexer_api=info,wallet_indexer=info,indexer_common=info,fastrace_opentelemetry=off,info"
+      APP__INFRA__SECRET: "303132333435363738393031323334353637383930313233343536373839303132"
+      APP__INFRA__NODE__URL: "ws://node:9944"
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:8088/api/v1/graphql']
       interval: 60s
@@ -39,6 +40,8 @@ services:
     image: 'midnightnetwork/midnight-node:0.12.1'
     container_name: 'midnight-node'
     command: ['--dev', '--unsafe-rpc-external', '--rpc-methods=unsafe']
+    environment:
+      CFG_PRESET: "dev"
     ports:
       - '9944'
     volumes:

@@ -16,8 +16,8 @@
     }
   },
   "scripts": {
-    "compact:bridge": "PATH=\"$HOME/.compact/versions/0.26.0/aarch64-darwin:$PATH\" ../compact/result/bin/compactc src/Bridge.compact src/managed/Bridge",
-    "compact:l2": "PATH=\"$HOME/.compact/versions/0.26.0/aarch64-darwin:$PATH\" ../compact/result/bin/compactc src/L2Simulation.compact src/managed/L2Simulation",
+    "compact:bridge": "./compactc_v0.27.107-alpha.0_aarch64-darwin/compactc src/Bridge.compact src/managed/Bridge",
+    "compact:l2": "./compactc_v0.27.107-alpha.0_aarch64-darwin/compactc src/L2Simulation.compact src/managed/L2Simulation",
     "compact": "npm run compact:bridge && npm run compact:l2",
     "test": "vitest run",
     "test:compile": "npm run compact && vitest run",

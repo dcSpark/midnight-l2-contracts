@@ -19,8 +19,7 @@ import {
   type CurvePoint,
   sampleContractAddress
 } from "@midnight-ntwrk/compact-runtime";
-import { encodeContractAddress } from "@midnight-ntwrk/ledger";
-import { nativeToken } from "@midnight-ntwrk/zswap";
+import { encodeContractAddress, nativeToken } from "@midnight-ntwrk/ledger-v6";
 import {
   Contract,
   type Ledger,
@@ -132,7 +131,7 @@ export class L2Simulator {
       this.circuitContext,
       {
         nonce: new Uint8Array(32),
-        color: encodeContractAddress(nativeToken()),
+        color: encodeContractAddress(nativeToken().raw),
         value: amount
       },
       l2_receiver
