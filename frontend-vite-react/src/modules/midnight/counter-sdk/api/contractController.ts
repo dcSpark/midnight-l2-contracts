@@ -82,10 +82,20 @@ export interface ContractControllerInterface {
     gasLimit: bigint,
     timestamp: bigint
   ) => Promise<Bridge.L1_DepositResult>;
+  depositNIGHTUnshielded: (
+    amount: bigint,
+    l2Recipient: Uint8Array,
+    gasLimit: bigint,
+    timestamp: bigint
+  ) => Promise<Bridge.L1_DepositResult>;
   withdrawNIGHT: (
     recipient: Uint8Array,
     amount: bigint
   ) => Promise<Bridge.WithdrawNIGHTResult>;
+  claimL1WithdrawalUnshielded: (
+    recipient: Uint8Array,
+    amount: bigint
+  ) => Promise<void>;
 }
 
 export class ContractController implements ContractControllerInterface {
@@ -220,6 +230,38 @@ export class ContractController implements ContractControllerInterface {
     }
   }
 
+  async depositNIGHTUnshielded(
+    amount: bigint,
+    l2Recipient: Uint8Array,
+    gasLimit: bigint,
+    timestamp: bigint
+  ): Promise<Bridge.L1_DepositResult> {
+    this.updateTurns({
+      depositNIGHTUnshielded: "Submitting unshielded deposit",
+    });
+    try {
+      const txData = await this.deployedContract.callTx.depositNIGHTUnshielded(
+        amount,
+        l2Recipient,
+        gasLimit,
+        timestamp
+      );
+      console.info(
+        "[bridge] depositNIGHTUnshielded txHash",
+        txData.public.txHash
+      );
+      const result = txData.private.result;
+      this.updateQuery({ lastDeposit: result });
+      await this.refreshQueries();
+      return result;
+    } catch (error) {
+      console.error("[bridge] depositNIGHTUnshielded error", error);
+      throw error;
+    } finally {
+      this.updateTurns({ depositNIGHTUnshielded: undefined });
+    }
+  }
+
   async withdrawNIGHT(
     recipient: Uint8Array,
     amount: bigint
@@ -236,6 +278,24 @@ export class ContractController implements ContractControllerInterface {
       return result;
     } finally {
       this.updateTurns({ withdrawNIGHT: undefined });
+    }
+  }
+
+  async claimL1WithdrawalUnshielded(
+    recipient: Uint8Array,
+    amount: bigint
+  ): Promise<void> {
+    this.updateTurns({
+      claimL1WithdrawalUnshielded: "Claiming unshielded withdrawal",
+    });
+    try {
+      await this.deployedContract.callTx.claimL1WithdrawalUnshielded(
+        recipient,
+        amount
+      );
+      await this.refreshQueries();
+    } finally {
+      this.updateTurns({ claimL1WithdrawalUnshielded: undefined });
     }
   }
 

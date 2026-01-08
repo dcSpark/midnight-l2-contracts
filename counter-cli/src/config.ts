@@ -1,9 +1,22 @@
 import path from 'node:path';
+import { createRequire } from 'node:module';
 export const currentDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
+const require = createRequire(import.meta.url);
+
+const resolveBridgeZkConfigPath = (): string => {
+  const override = process.env.BRIDGE_ZK_CONFIG_PATH;
+  if (override) {
+    return override;
+  }
+
+  const bridgeModulePath = require.resolve('counter-contract/browser');
+  return path.resolve(path.dirname(bridgeModulePath), 'managed', 'Bridge');
+};
+
 export const contractConfig = {
-  privateStateStoreName: 'l2-private-state',
-  zkConfigPath: path.resolve(currentDir, '..', '..', 'counter-contract', 'src', 'managed', 'L2Simulation'),
+  privateStateStoreName: 'bridge-private-state',
+  zkConfigPath: resolveBridgeZkConfigPath(),
 };
 
 const DEFAULT_PROOF_TIMEOUT_MS = 120 * 60 * 1000;

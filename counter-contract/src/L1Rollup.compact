@@ -113,10 +113,12 @@ module L1Rollup {
   export ledger feeVault: Uint<128>;
 
   // Liquidity coins backing withdrawals (keyed by L1→L2 queueIndex)
-  ledger liquidityCoins: Map<Uint<64>, QualifiedShieldedCoinInfo>;
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // ledger liquidityCoins: Map<Uint<64>, QualifiedShieldedCoinInfo>;
 
   // Fee coins backing L2 gas fees (keyed by L1→L2 queueIndex)
-  ledger feeCoins: Map<Uint<64>, QualifiedShieldedCoinInfo>;
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // ledger feeCoins: Map<Uint<64>, QualifiedShieldedCoinInfo>;
 
   // Pending withdrawals (recipient -> amount)
   ledger pendingWithdrawals: Map<Bytes<32>, Uint<128>>;
@@ -234,33 +236,124 @@ module L1Rollup {
   // ============================================================================
 
   // L1→L2: deposit NIGHT and enqueue message (no fee coin)
-  export circuit depositNIGHT(
-    coin_: ShieldedCoinInfo,
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // export circuit depositNIGHT(
+  //   coin_: ShieldedCoinInfo,
+  //   l2Recipient_: Bytes<32>,
+  //   gasLimit_: Uint<64>,
+  //   timestamp_: Uint<64>
+  // ): DepositResult {
+  //   const coin = disclose(coin_);
+  //   const l2Recipient = disclose(l2Recipient_);
+  //   const gasLimit = disclose(gasLimit_);
+  //   const ts = disclose(timestamp_);
+  //
+  //   assertTimestampNotFuture(ts);
+  //
+  //   assert(coin.color == nativeToken(), "Only nativeToken deposits supported");
+  //   receiveShielded(coin);
+  //
+  //   const queueIndex = nextCrossDomainMessageIndex;
+  //
+  //   // Store coin as liquidity under queueIndex
+  //   liquidityCoins.insertCoin(queueIndex, coin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
+  //
+  //   lockedNIGHT = ((lockedNIGHT + coin.value) as Uint<128>);
+  //
+  //   const msg = PT_L1ToL2DepositMessage {
+  //     sender: callerId(),
+  //     recipient: l2Recipient,
+  //     amount: coin.value,
+  //     nonce: queueIndex,
+  //     gasLimit: gasLimit,
+  //     dataHash: zero32()
+  //   };
+  //
+  //   const messageHash = PT_hashL1ToL2Deposit(msg);
+  //   const [idx, rollingHash] = appendCrossDomainMessage(messageHash, ts);
+  //   assert(idx == queueIndex, "QUEUE_INDEX_MISMATCH");
+  //
+  //   l1ToL2Deposits.insert(queueIndex, msg);
+  //
+  //   return DepositResult { queueIndex: queueIndex, messageHash: messageHash, rollingHash: rollingHash };
+  // }
+  //
+  // L1→L2: deposit NIGHT + fee coin (fee coin stored separately, claimable via claimFees)
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // export circuit depositNIGHTWithFee(
+  //   amountCoin_: ShieldedCoinInfo,
+  //   feeCoin_: ShieldedCoinInfo,
+  //   l2Recipient_: Bytes<32>,
+  //   gasLimit_: Uint<64>,
+  //   timestamp_: Uint<64>
+  // ): DepositResult {
+  //   const amountCoin = disclose(amountCoin_);
+  //   const feeCoin = disclose(feeCoin_);
+  //   const l2Recipient = disclose(l2Recipient_);
+  //   const gasLimit = disclose(gasLimit_);
+  //   const ts = disclose(timestamp_);
+  //
+  //   assertTimestampNotFuture(ts);
+  //
+  //   assert(amountCoin.color == nativeToken(), "Only nativeToken deposits supported");
+  //   assert(feeCoin.color == nativeToken(), "Only nativeToken fee supported");
+  //   assert(feeCoin.value > (0 as Uint<128>), "FEE_MUST_BE_NONZERO");
+  //
+  //   receiveShielded(amountCoin);
+  //   receiveShielded(feeCoin);
+  //
+  //   const queueIndex = nextCrossDomainMessageIndex;
+  //
+  //   // Liquidity
+  //   liquidityCoins.insertCoin(queueIndex, amountCoin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
+  //   lockedNIGHT = ((lockedNIGHT + amountCoin.value) as Uint<128>);
+  //
+  //   // Fees
+  //   feeCoins.insertCoin(queueIndex, feeCoin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
+  //   feeVault = ((feeVault + feeCoin.value) as Uint<128>);
+  //
+  //   const msg = PT_L1ToL2DepositMessage {
+  //     sender: callerId(),
+  //     recipient: l2Recipient,
+  //     amount: amountCoin.value,
+  //     nonce: queueIndex,
+  //     gasLimit: gasLimit,
+  //     dataHash: zero32()
+  //   };
+  //
+  //   const messageHash = PT_hashL1ToL2Deposit(msg);
+  //   const [idx, rollingHash] = appendCrossDomainMessage(messageHash, ts);
+  //   assert(idx == queueIndex, "QUEUE_INDEX_MISMATCH");
+  //
+  //   l1ToL2Deposits.insert(queueIndex, msg);
+  //
+  //   return DepositResult { queueIndex: queueIndex, messageHash: messageHash, rollingHash: rollingHash };
+  // }
+
+  // L1→L2: deposit unshielded NIGHT and enqueue message (no fee)
+  export circuit depositNIGHTUnshielded(
+    amount_: Uint<128>,
     l2Recipient_: Bytes<32>,
     gasLimit_: Uint<64>,
     timestamp_: Uint<64>
   ): DepositResult {
-    const coin = disclose(coin_);
+    const amount = disclose(amount_);
     const l2Recipient = disclose(l2Recipient_);
     const gasLimit = disclose(gasLimit_);
     const ts = disclose(timestamp_);
 
     assertTimestampNotFuture(ts);
+    assert(amount > (0 as Uint<128>), "ZERO_AMOUNT");
 
-    assert(coin.color == nativeToken(), "Only nativeToken deposits supported");
-    receiveShielded(coin);
+    receiveUnshielded(nativeToken(), amount);
 
     const queueIndex = nextCrossDomainMessageIndex;
-
-    // Store coin as liquidity under queueIndex
-    liquidityCoins.insertCoin(queueIndex, coin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
-
-    lockedNIGHT = ((lockedNIGHT + coin.value) as Uint<128>);
+    lockedNIGHT = ((lockedNIGHT + amount) as Uint<128>);
 
     const msg = PT_L1ToL2DepositMessage {
       sender: callerId(),
       recipient: l2Recipient,
-      amount: coin.value,
+      amount: amount,
       nonce: queueIndex,
       gasLimit: gasLimit,
       dataHash: zero32()
@@ -275,43 +368,36 @@ module L1Rollup {
     return DepositResult { queueIndex: queueIndex, messageHash: messageHash, rollingHash: rollingHash };
   }
 
-  // L1→L2: deposit NIGHT + fee coin (fee coin stored separately, claimable via claimFees)
-  export circuit depositNIGHTWithFee(
-    amountCoin_: ShieldedCoinInfo,
-    feeCoin_: ShieldedCoinInfo,
+  // L1→L2: deposit unshielded NIGHT + unshielded fee
+  export circuit depositNIGHTUnshieldedWithFee(
+    amount_: Uint<128>,
+    fee_: Uint<128>,
     l2Recipient_: Bytes<32>,
     gasLimit_: Uint<64>,
     timestamp_: Uint<64>
   ): DepositResult {
-    const amountCoin = disclose(amountCoin_);
-    const feeCoin = disclose(feeCoin_);
+    const amount = disclose(amount_);
+    const fee = disclose(fee_);
     const l2Recipient = disclose(l2Recipient_);
     const gasLimit = disclose(gasLimit_);
     const ts = disclose(timestamp_);
 
     assertTimestampNotFuture(ts);
+    assert(amount > (0 as Uint<128>), "ZERO_AMOUNT");
+    assert(fee > (0 as Uint<128>), "FEE_MUST_BE_NONZERO");
 
-    assert(amountCoin.color == nativeToken(), "Only nativeToken deposits supported");
-    assert(feeCoin.color == nativeToken(), "Only nativeToken fee supported");
-    assert(feeCoin.value > (0 as Uint<128>), "FEE_MUST_BE_NONZERO");
-
-    receiveShielded(amountCoin);
-    receiveShielded(feeCoin);
+    receiveUnshielded(nativeToken(), amount);
+    receiveUnshielded(nativeToken(), fee);
 
     const queueIndex = nextCrossDomainMessageIndex;
 
-    // Liquidity
-    liquidityCoins.insertCoin(queueIndex, amountCoin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
-    lockedNIGHT = ((lockedNIGHT + amountCoin.value) as Uint<128>);
-
-    // Fees
-    feeCoins.insertCoin(queueIndex, feeCoin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
-    feeVault = ((feeVault + feeCoin.value) as Uint<128>);
+    lockedNIGHT = ((lockedNIGHT + amount) as Uint<128>);
+    feeVault = ((feeVault + fee) as Uint<128>);
 
     const msg = PT_L1ToL2DepositMessage {
       sender: callerId(),
       recipient: l2Recipient,
-      amount: amountCoin.value,
+      amount: amount,
       nonce: queueIndex,
       gasLimit: gasLimit,
       dataHash: zero32()
@@ -342,99 +428,140 @@ module L1Rollup {
 
   // Claim a pending withdrawal by spending a liquidity coin.
   // IMPORTANT: Allows partial spends and re-inserts change coin under the same key.
-  export circuit claimWithdrawal(depositId_: Uint<64>, amount_: Uint<128>): [] {
-    const depositId = disclose(depositId_);
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // export circuit claimWithdrawal(depositId_: Uint<64>, amount_: Uint<128>): [] {
+  //   const depositId = disclose(depositId_);
+  //   const amount = disclose(amount_);
+  //
+  //   assert(amount > (0 as Uint<128>), "ZERO_AMOUNT");
+  //
+  //   const claimerPk = ownPublicKey();
+  //   const claimerBytes = callerId();
+  //
+  //   assert(pendingWithdrawals.member(claimerBytes), "NO_PENDING_WITHDRAWAL");
+  //   const pending = pendingWithdrawals.lookup(claimerBytes);
+  //   assert(amount <= pending, "CLAIM_EXCEEDS_PENDING");
+  //
+  //   assert(liquidityCoins.member(depositId), "INVALID_DEPOSIT_ID");
+  //   const coin = liquidityCoins.lookup(depositId);
+  //
+  //   assert(coin.color == nativeToken(), "BAD_LIQUIDITY_COIN");
+  //   assert(amount <= coin.value, "CLAIM_EXCEEDS_COIN");
+  //
+  //   const receiver = left<ZswapCoinPublicKey, ContractAddress>(claimerPk);
+  //   const res = sendShielded(coin, receiver, amount);
+  //
+  //   // Update pending
+  //   const remaining = ((pending - amount) as Uint<128>);
+  //   if (remaining == (0 as Uint<128>)) {
+  //     pendingWithdrawals.remove(claimerBytes);
+  //   } else {
+  //     pendingWithdrawals.insert(claimerBytes, remaining);
+  //   }
+  //
+  //   // Update liquidity coin slot: replace with change if any, else remove.
+  //   liquidityCoins.remove(depositId);
+  //   if (res.change.is_some) {
+  //     liquidityCoins.insertCoin(
+  //       depositId,
+  //       res.change.value,
+  //       right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+  //     );
+  //   }
+  // }
+
+  // Claim a pending withdrawal by sending unshielded NIGHT to the recipient address.
+  export circuit claimWithdrawalUnshielded(recipient_: Bytes<32>, amount_: Uint<128>): [] {
+    const recipient = disclose(recipient_);
     const amount = disclose(amount_);
 
     assert(amount > (0 as Uint<128>), "ZERO_AMOUNT");
+    assert(pendingWithdrawals.member(recipient), "NO_PENDING_WITHDRAWAL");
 
-    const claimerPk = ownPublicKey();
-    const claimerBytes = callerId();
-
-    assert(pendingWithdrawals.member(claimerBytes), "NO_PENDING_WITHDRAWAL");
-    const pending = pendingWithdrawals.lookup(claimerBytes);
+    const pending = pendingWithdrawals.lookup(recipient);
     assert(amount <= pending, "CLAIM_EXCEEDS_PENDING");
 
-    assert(liquidityCoins.member(depositId), "INVALID_DEPOSIT_ID");
-    const coin = liquidityCoins.lookup(depositId);
-
-    assert(coin.color == nativeToken(), "BAD_LIQUIDITY_COIN");
-    assert(amount <= coin.value, "CLAIM_EXCEEDS_COIN");
-
-    const receiver = left<ZswapCoinPublicKey, ContractAddress>(claimerPk);
-    const res = sendShielded(coin, receiver, amount);
-
-    // Update pending
     const remaining = ((pending - amount) as Uint<128>);
     if (remaining == (0 as Uint<128>)) {
-      pendingWithdrawals.remove(claimerBytes);
+      pendingWithdrawals.remove(recipient);
     } else {
-      pendingWithdrawals.insert(claimerBytes, remaining);
+      pendingWithdrawals.insert(recipient, remaining);
     }
 
-    // Update liquidity coin slot: replace with change if any, else remove.
-    liquidityCoins.remove(depositId);
-    if (res.change.is_some) {
-      liquidityCoins.insertCoin(
-        depositId,
-        res.change.value,
-        right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
-      );
-    }
+    const user = UserAddress { bytes: recipient };
+    sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
   }
 
   // Claim fees (sequencer or owner). Partial spends supported, change reinserted.
-  export circuit claimFees(queueIndex_: Uint<64>, amount_: Uint<128>): [] {
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // export circuit claimFees(queueIndex_: Uint<64>, amount_: Uint<128>): [] {
+  //   onlyOwnerOrSequencer();
+  //
+  //   const queueIndex = disclose(queueIndex_);
+  //   const amount = disclose(amount_);
+  //
+  //   assert(amount > (0 as Uint<128>), "ZERO_AMOUNT");
+  //   assert(amount <= feeVault, "CLAIM_EXCEEDS_FEE_VAULT");
+  //
+  //   assert(feeCoins.member(queueIndex), "NO_FEE_COIN");
+  //   const coin = feeCoins.lookup(queueIndex);
+  //
+  //   assert(coin.color == nativeToken(), "BAD_FEE_COIN");
+  //   assert(amount <= coin.value, "CLAIM_EXCEEDS_COIN");
+  //
+  //   const receiver = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+  //   const res = sendShielded(coin, receiver, amount);
+  //
+  //   feeVault = ((feeVault - amount) as Uint<128>);
+  //
+  //   feeCoins.remove(queueIndex);
+  //   if (res.change.is_some) {
+  //     feeCoins.insertCoin(
+  //       queueIndex,
+  //       res.change.value,
+  //       right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+  //     );
+  //   }
+  // }
+
+  // Claim fees (sequencer or owner) as unshielded NIGHT.
+  export circuit claimFeesUnshielded(amount_: Uint<128>, recipient_: Bytes<32>): [] {
     onlyOwnerOrSequencer();
 
-    const queueIndex = disclose(queueIndex_);
     const amount = disclose(amount_);
+    const recipient = disclose(recipient_);
 
     assert(amount > (0 as Uint<128>), "ZERO_AMOUNT");
     assert(amount <= feeVault, "CLAIM_EXCEEDS_FEE_VAULT");
 
-    assert(feeCoins.member(queueIndex), "NO_FEE_COIN");
-    const coin = feeCoins.lookup(queueIndex);
-
-    assert(coin.color == nativeToken(), "BAD_FEE_COIN");
-    assert(amount <= coin.value, "CLAIM_EXCEEDS_COIN");
-
-    const receiver = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-    const res = sendShielded(coin, receiver, amount);
-
     feeVault = ((feeVault - amount) as Uint<128>);
 
-    feeCoins.remove(queueIndex);
-    if (res.change.is_some) {
-      feeCoins.insertCoin(
-        queueIndex,
-        res.change.value,
-        right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
-      );
-    }
+    const user = UserAddress { bytes: recipient };
+    sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
   }
 
   export circuit getPendingWithdrawal(recipient: Bytes<32>): Uint<128> {
     return pendingWithdrawals.member(recipient) ? pendingWithdrawals.lookup(recipient) : (0 as Uint<128>);
   }
 
-  export circuit hasLiquidityCoin(id_: Uint<64>): Boolean {
-    return liquidityCoins.member(disclose(id_));
-  }
-
-  export circuit getLiquidityCoinValue(id_: Uint<64>): Uint<128> {
-    const id = disclose(id_);
-    return liquidityCoins.member(id) ? liquidityCoins.lookup(id).value : (0 as Uint<128>);
-  }
-
-  export circuit hasFeeCoin(id_: Uint<64>): Boolean {
-    return feeCoins.member(disclose(id_));
-  }
-
-  export circuit getFeeCoinValue(id_: Uint<64>): Uint<128> {
-    const id = disclose(id_);
-    return feeCoins.member(id) ? feeCoins.lookup(id).value : (0 as Uint<128>);
-  }
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // export circuit hasLiquidityCoin(id_: Uint<64>): Boolean {
+  //   return liquidityCoins.member(disclose(id_));
+  // }
+  //
+  // export circuit getLiquidityCoinValue(id_: Uint<64>): Uint<128> {
+  //   const id = disclose(id_);
+  //   return liquidityCoins.member(id) ? liquidityCoins.lookup(id).value : (0 as Uint<128>);
+  // }
+  //
+  // export circuit hasFeeCoin(id_: Uint<64>): Boolean {
+  //   return feeCoins.member(disclose(id_));
+  // }
+  //
+  // export circuit getFeeCoinValue(id_: Uint<64>): Uint<128> {
+  //   const id = disclose(id_);
+  //   return feeCoins.member(id) ? feeCoins.lookup(id).value : (0 as Uint<128>);
+  // }
 
   // ============================================================================
   // WITHDRAW PROOF VERIFICATION (Layer 2)

@@ -124,31 +124,65 @@ export circuit getWithdrawMessageCount(): Uint<64> { return MQ_getMessageCount()
 export { L1_DepositResult, L1_WithdrawProof16, L1_BatchPublicDataV1Full, L1_RollupMiscData };
 
 // L1 deposit (no fee coin)
-export circuit depositNIGHT(
-  coin_: ShieldedCoinInfo,
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit depositNIGHT(
+//   coin_: ShieldedCoinInfo,
+//   l2Recipient_: Bytes<32>,
+//   gasLimit_: Uint<64>,
+//   timestamp_: Uint<64>
+// ): L1_DepositResult {
+//   return L1_depositNIGHT(
+//     disclose(coin_),
+//     disclose(l2Recipient_),
+//     disclose(gasLimit_),
+//     disclose(timestamp_)
+//   );
+// }
+//
+// L1 deposit with fee coin
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit depositNIGHTWithFee(
+//   amountCoin_: ShieldedCoinInfo,
+//   feeCoin_: ShieldedCoinInfo,
+//   l2Recipient_: Bytes<32>,
+//   gasLimit_: Uint<64>,
+//   timestamp_: Uint<64>
+// ): L1_DepositResult {
+//   return L1_depositNIGHTWithFee(
+//     disclose(amountCoin_),
+//     disclose(feeCoin_),
+//     disclose(l2Recipient_),
+//     disclose(gasLimit_),
+//     disclose(timestamp_)
+//   );
+// }
+
+// L1 deposit (unshielded NIGHT)
+export circuit depositNIGHTUnshielded(
+  amount_: Uint<128>,
   l2Recipient_: Bytes<32>,
   gasLimit_: Uint<64>,
   timestamp_: Uint<64>
 ): L1_DepositResult {
-  return L1_depositNIGHT(
-    disclose(coin_),
+  return L1_depositNIGHTUnshielded(
+    disclose(amount_),
     disclose(l2Recipient_),
     disclose(gasLimit_),
     disclose(timestamp_)
   );
 }
 
-// L1 deposit with fee coin
-export circuit depositNIGHTWithFee(
-  amountCoin_: ShieldedCoinInfo,
-  feeCoin_: ShieldedCoinInfo,
+// L1 deposit with unshielded fee
+export circuit depositNIGHTUnshieldedWithFee(
+  amount_: Uint<128>,
+  fee_: Uint<128>,
   l2Recipient_: Bytes<32>,
   gasLimit_: Uint<64>,
   timestamp_: Uint<64>
 ): L1_DepositResult {
-  return L1_depositNIGHTWithFee(
-    disclose(amountCoin_),
-    disclose(feeCoin_),
+  return L1_depositNIGHTUnshieldedWithFee(
+    disclose(amount_),
+    disclose(fee_),
     disclose(l2Recipient_),
     disclose(gasLimit_),
     disclose(timestamp_)
@@ -171,13 +205,25 @@ export circuit relayWithdrawNIGHTWithProof(
 }
 
 // Claim a verified withdrawal (partial spend supported)
-export circuit claimL1Withdrawal(depositId_: Uint<64>, amount_: Uint<128>): [] {
-  L1_claimWithdrawal(disclose(depositId_), disclose(amount_));
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit claimL1Withdrawal(depositId_: Uint<64>, amount_: Uint<128>): [] {
+//   L1_claimWithdrawal(disclose(depositId_), disclose(amount_));
+// }
+
+// Claim a verified withdrawal in unshielded NIGHT
+export circuit claimL1WithdrawalUnshielded(recipient_: Bytes<32>, amount_: Uint<128>): [] {
+  L1_claimWithdrawalUnshielded(disclose(recipient_), disclose(amount_));
 }
 
 // Claim fee vault coins (owner or sequencer)
-export circuit claimL1Fees(queueIndex_: Uint<64>, amount_: Uint<128>): [] {
-  L1_claimFees(disclose(queueIndex_), disclose(amount_));
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit claimL1Fees(queueIndex_: Uint<64>, amount_: Uint<128>): [] {
+//   L1_claimFees(disclose(queueIndex_), disclose(amount_));
+// }
+
+// Claim fee vault coins in unshielded NIGHT (owner or sequencer)
+export circuit claimL1FeesUnshielded(amount_: Uint<128>, recipient_: Bytes<32>): [] {
+  L1_claimFeesUnshielded(disclose(amount_), disclose(recipient_));
 }
 
 // Batch lifecycle
@@ -233,7 +279,8 @@ export circuit getPendingWithdrawal(recipient_: Bytes<32>): Uint<128> {
 }
 
 // Pool helpers (needed to pick a coin id off-chain)
-export circuit hasLiquidityCoin(id_: Uint<64>): Boolean { return L1_hasLiquidityCoin(disclose(id_)); }
-export circuit getLiquidityCoinValue(id_: Uint<64>): Uint<128> { return L1_getLiquidityCoinValue(disclose(id_)); }
-export circuit hasFeeCoin(id_: Uint<64>): Boolean { return L1_hasFeeCoin(disclose(id_)); }
-export circuit getFeeCoinValue(id_: Uint<64>): Uint<128> { return L1_getFeeCoinValue(disclose(id_)); }
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit hasLiquidityCoin(id_: Uint<64>): Boolean { return L1_hasLiquidityCoin(disclose(id_)); }
+// export circuit getLiquidityCoinValue(id_: Uint<64>): Uint<128> { return L1_getLiquidityCoinValue(disclose(id_)); }
+// export circuit hasFeeCoin(id_: Uint<64>): Boolean { return L1_hasFeeCoin(disclose(id_)); }
+// export circuit getFeeCoinValue(id_: Uint<64>): Uint<128> { return L1_getFeeCoinValue(disclose(id_)); }

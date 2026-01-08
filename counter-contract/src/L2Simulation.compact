@@ -22,9 +22,10 @@ import L2MessageQueue prefix MQ_;
 
 export { derivePk, Signature };
 
-export struct WithdrawInfo {
-  depositId: Uint<64>;
-}
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export struct WithdrawInfo {
+//   depositId: Uint<64>;
+// }
 
 export struct WithdrawNIGHTResult {
   nonce: Uint<64>;
@@ -67,13 +68,14 @@ export pure circuit verifyStateRootSignature(msg: Bytes<32>, signature: Signatur
   return verifySignature<Bytes<32>>(msg, signature);
 }
 
-export pure circuit signWithdraw(msg: WithdrawInfo, sk: Field, nonce: Field): Signature {
-  return sign<WithdrawInfo>(msg, sk, nonce);
-}
-
-export pure circuit verifyWithdraw(msg: WithdrawInfo, signature: Signature): Boolean {
-  return verifySignature<WithdrawInfo>(msg, signature);
-}
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export pure circuit signWithdraw(msg: WithdrawInfo, sk: Field, nonce: Field): Signature {
+//   return sign<WithdrawInfo>(msg, sk, nonce);
+// }
+//
+// export pure circuit verifyWithdraw(msg: WithdrawInfo, signature: Signature): Boolean {
+//   return verifySignature<WithdrawInfo>(msg, signature);
+// }
 
 // Protocol helpers
 export pure circuit dsL2ToL1Withdraw(): Bytes<32> { return PT_dsL2ToL1Withdraw(); }
@@ -118,20 +120,22 @@ export circuit updateStateRoot(newRoot: Bytes<32>, sig: Signature): [] {
 }
 
 // Deposit: receive coin, credit L2 balance, store coin
-export circuit deposit(coin_: ShieldedCoinInfo, l2_receiver: Bytes<32>): Uint<64> {
-  const coin = disclose(coin_);
-  return GW_legacyDeposit(coin);
-}
-
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit deposit(coin_: ShieldedCoinInfo, l2_receiver: Bytes<32>): Uint<64> {
+//   const coin = disclose(coin_);
+//   return GW_legacyDeposit(coin);
+// }
+//
 // Withdraw: verify signature, send coin back to caller
-export circuit withdraw(wi_: WithdrawInfo, sig: Signature): [] {
-  const wi = disclose(wi_);
-  assert(verifySignature<WithdrawInfo>(wi, sig), "Invalid signature");
-  const signerPk = disclose(sig).pk;
-  // Convert to L2Gateway's WithdrawInfo
-  const gwWi = GW_WithdrawInfo { depositId: wi.depositId };
-  GW_legacyWithdraw(gwWi, signerPk);
-}
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit withdraw(wi_: WithdrawInfo, sig: Signature): [] {
+//   const wi = disclose(wi_);
+//   assert(verifySignature<WithdrawInfo>(wi, sig), "Invalid signature");
+//   const signerPk = disclose(sig).pk;
+//   // Convert to L2Gateway's WithdrawInfo
+//   const gwWi = GW_WithdrawInfo { depositId: wi.depositId };
+//   GW_legacyWithdraw(gwWi, signerPk);
+// }
 
 // Get balance for a user
 export circuit getBalance(user_: ZswapCoinPublicKey): Uint<128> {

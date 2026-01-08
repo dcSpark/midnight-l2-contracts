@@ -16,35 +16,24 @@
 import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import { describe, expect, it } from "vitest";
 import { L2Simulator } from "./L2Simulation-simulator.js";
+import { computeZeroHash } from "../protocol-types";
 
 setNetworkId("undeployed");
 
 describe("The bridge", () => {
-  it("enables nativeToken deposit", () => {
+  it("initializes the withdraw queue state", () => {
     const simulator = new L2Simulator();
 
     const userPubKey = new Uint8Array(32); // TODO: get through witnesses.ts
-    const initBalance = simulator.getBalance(userPubKey);
-    expect(initBalance).toEqual(0n);
-
-    simulator.deposit(1_234_000n, new Uint8Array(32));
-
-    const balance = simulator.getBalance(userPubKey);
-    expect(balance).toEqual(1_234_000n);
+    expect(simulator.getBalance(userPubKey)).toEqual(0n);
+    expect(simulator.getWithdrawMessageCount()).toEqual(0n);
+    expect(simulator.getWithdrawRoot()).toEqual(computeZeroHash(15));
   });
 
-  it("enables nativeToken withdrawal", () => {
+  it("rejects withdrawals without a balance", () => {
     const simulator = new L2Simulator();
-
-    const userPubKey = new Uint8Array(32); // TODO: get through witnesses.ts
-    const depositId = simulator.deposit(1_234_000n, new Uint8Array(32));
-    const balance = simulator.getBalance(userPubKey);
-    expect(balance).toEqual(1_234_000n);
-
-    const sig = simulator.signWithdraw({ depositId }, 0);
-    simulator.withdraw({ depositId }, sig);
-
-    const balanceAfter = simulator.getBalance(userPubKey);
-    expect(balanceAfter).toEqual(0n);
+    expect(() =>
+      simulator.withdrawNIGHT(new Uint8Array(32), 1n)
+    ).toThrow();
   });
 });

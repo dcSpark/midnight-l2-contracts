@@ -12,11 +12,18 @@ import {
 import { ModeToggle } from "@/components/mode-toggle";
 import { useContractSubscription } from "@/modules/midnight/counter-sdk/hooks/use-contract-subscription";
 import { DEFAULT_VERIFIER_SECRET_KEYS } from "@/modules/midnight/counter-sdk/api/contractController";
+import { useWallet } from "@/modules/midnight/wallet-widget/hooks/useWallet";
 import {
   encodeCoinPublicKey,
   fromHex,
   toHex,
 } from "@midnight-ntwrk/compact-runtime";
+import * as ledger from "@midnight-ntwrk/ledger-v6";
+import { bech32, bech32m } from "@scure/base";
+import {
+  MidnightBech32m,
+  UnshieldedAddress,
+} from "@midnight-ntwrk/wallet-sdk-address-format";
 
 const truncateMiddle = (value: string, keep = 10) => {
   if (value.length <= keep * 2 + 2) {
@@ -39,18 +46,72 @@ const formatBigint = (value?: bigint) => {
   return value.toString();
 };
 
-const parseBytes32 = (label: string, value: string) => {
-  const normalized = value.trim().replace(/^0x/i, "");
-  if (!normalized) {
-    throw new Error(`${label} is required`);
+const formatWalletBalance = (value?: bigint) => {
+  if (value === undefined) {
+    return "Not connected";
   }
-  if (!/^[0-9a-fA-F]+$/.test(normalized)) {
-    throw new Error(`${label} must be hex`);
+  return value.toString();
+};
+
+const getTokenBalance = (
+  balances: Record<string, bigint> | undefined,
+  tokenId: string
+) => {
+  if (!balances) {
+    return undefined;
   }
-  if (normalized.length > 64) {
+  if (Object.prototype.hasOwnProperty.call(balances, tokenId)) {
+    return balances[tokenId];
+  }
+  return 0n;
+};
+
+const padBytes32 = (label: string, bytes: Uint8Array) => {
+  if (bytes.length > 32) {
     throw new Error(`${label} must be 32 bytes or less`);
   }
-  return fromHex(normalized.padStart(64, "0"));
+  if (bytes.length === 32) {
+    return bytes;
+  }
+  const padded = new Uint8Array(32);
+  padded.set(bytes, 32 - bytes.length);
+  return padded;
+};
+
+const decodeBech32Bytes = (label: string, value: string) => {
+  const trimmed = value.trim();
+  const decoders = [bech32m, bech32];
+  let lastError: Error | undefined;
+  for (const decoder of decoders) {
+    try {
+      const { words } = decoder.decode(trimmed);
+      return padBytes32(label, Uint8Array.from(decoder.fromWords(words)));
+    } catch (error) {
+      lastError = error as Error;
+    }
+  }
+  throw (
+    lastError ?? new Error(`${label} must be hex or a bech32 address`)
+  );
+};
+
+const parseBytes32 = (label: string, value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`${label} is required`);
+  }
+  const normalized = trimmed.replace(/^0x/i, "");
+  if (/^[0-9a-fA-F]+$/.test(normalized)) {
+    if (normalized.length > 64) {
+      throw new Error(`${label} must be 32 bytes or less`);
+    }
+    return fromHex(normalized.padStart(64, "0"));
+  }
+  try {
+    return decodeBech32Bytes(label, trimmed);
+  } catch {
+    throw new Error(`${label} must be hex or a bech32 address`);
+  }
 };
 
 const parseBigint = (label: string, value: string) => {
@@ -66,6 +127,14 @@ const nowSeconds = () => Math.floor(Date.now() / 1000).toString();
 export const Counter = () => {
   const { deployedContractAPI, derivedState, onDeploy, providers } =
     useContractSubscription();
+  const {
+    unshieldedAddress,
+    unshieldedBalances,
+    shieldedBalances,
+    dustBalance,
+    refresh: refreshWallet,
+    status,
+  } = useWallet();
   const [deployedAddress, setDeployedAddress] = useState<string | undefined>(
     undefined
   );
@@ -83,6 +152,18 @@ export const Counter = () => {
     useState<string>("");
   const [withdrawAmountInput, setWithdrawAmountInput] =
     useState<string>("0");
+  const [unshieldedDepositAmountInput, setUnshieldedDepositAmountInput] =
+    useState<string>("0");
+  const [unshieldedDepositRecipientInput, setUnshieldedDepositRecipientInput] =
+    useState<string>("");
+  const [unshieldedDepositGasLimitInput, setUnshieldedDepositGasLimitInput] =
+    useState<string>("100000");
+  const [unshieldedDepositTimestampInput, setUnshieldedDepositTimestampInput] =
+    useState<string>(nowSeconds());
+  const [unshieldedClaimRecipientInput, setUnshieldedClaimRecipientInput] =
+    useState<string>("");
+  const [unshieldedClaimAmountInput, setUnshieldedClaimAmountInput] =
+    useState<string>("0");
 
   useEffect(() => {
     if (derivedState) {
@@ -91,6 +172,15 @@ export const Counter = () => {
   }, [derivedState]);
 
   const connectedAddress = deployedContractAPI?.deployedContractAddress;
+  const nightTokenId = useMemo(() => ledger.nativeToken().raw, []);
+  const unshieldedNightBalance = useMemo(
+    () => getTokenBalance(unshieldedBalances, nightTokenId),
+    [unshieldedBalances, nightTokenId]
+  );
+  const shieldedNightBalance = useMemo(
+    () => getTokenBalance(shieldedBalances, nightTokenId),
+    [shieldedBalances, nightTokenId]
+  );
 
   const walletRecipientHex = useMemo(() => {
     const coinPublicKey = providers?.walletProvider?.getCoinPublicKey();
@@ -99,6 +189,18 @@ export const Counter = () => {
     }
     return toHex(encodeCoinPublicKey(coinPublicKey));
   }, [providers?.walletProvider]);
+  const walletUnshieldedHex = useMemo(() => {
+    if (!unshieldedAddress?.unshieldedAddress) {
+      return undefined;
+    }
+    try {
+      const parsed = MidnightBech32m.parse(unshieldedAddress.unshieldedAddress);
+      const decoded = UnshieldedAddress.codec.decode(parsed.network, parsed);
+      return decoded.hexString;
+    } catch (error) {
+      return undefined;
+    }
+  }, [unshieldedAddress?.unshieldedAddress]);
 
   const deployNew = async () => {
     setActionError(undefined);
@@ -165,6 +267,65 @@ export const Counter = () => {
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "Failed to withdraw NIGHT"
+      );
+    }
+  };
+
+  const submitUnshieldedDeposit = async () => {
+    if (!deployedContractAPI) {
+      return;
+    }
+    setActionError(undefined);
+    try {
+      const amount = parseBigint(
+        "Unshielded deposit amount",
+        unshieldedDepositAmountInput
+      ) * 10n ** 6n;
+      if (amount <= 0n) {
+        throw new Error("Deposit amount must be greater than zero");
+      }
+      const recipientHex =
+        unshieldedDepositRecipientInput.trim() || walletRecipientHex || "";
+      const l2Recipient = parseBytes32("L2 recipient", recipientHex);
+      const gasLimit = parseBigint("Gas limit", unshieldedDepositGasLimitInput);
+      const timestamp = parseBigint(
+        "Timestamp",
+        unshieldedDepositTimestampInput || nowSeconds()
+      );
+      await deployedContractAPI.depositNIGHTUnshielded(
+        amount,
+        l2Recipient,
+        gasLimit,
+        timestamp
+      );
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Failed to deposit unshielded NIGHT"
+      );
+    }
+  };
+
+  const submitUnshieldedClaim = async () => {
+    if (!deployedContractAPI) {
+      return;
+    }
+    setActionError(undefined);
+    try {
+      const recipientHex =
+        unshieldedClaimRecipientInput.trim() || walletUnshieldedHex || "";
+      const recipient = parseBytes32("Recipient", recipientHex);
+      const amount = parseBigint("Amount", unshieldedClaimAmountInput);
+      if (amount <= 0n) {
+        throw new Error("Amount must be greater than zero");
+      }
+      await deployedContractAPI.claimL1WithdrawalUnshielded(recipient, amount);
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Failed to claim unshielded withdrawal"
       );
     }
   };
@@ -244,6 +405,83 @@ export const Counter = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
+              <CardTitle>Wallet Balances</CardTitle>
+              <CardDescription>Unshielded and shielded NIGHT</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-sm font-medium text-muted-foreground mb-1">
+                  Unshielded NIGHT
+                </p>
+                <p className="text-sm font-mono">
+                  {formatWalletBalance(unshieldedNightBalance)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-sm font-medium text-muted-foreground mb-1">
+                  Shielded NIGHT
+                </p>
+                <p className="text-sm font-mono">
+                  {formatWalletBalance(shieldedNightBalance)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-sm font-medium text-muted-foreground mb-1">
+                  Dust Balance
+                </p>
+                <p className="text-sm font-mono">
+                  {formatWalletBalance(dustBalance?.balance)}
+                </p>
+              </div>
+              <Button
+                onClick={refreshWallet}
+                disabled={status?.status !== "connected"}
+                variant={status?.status === "connected" ? "default" : "secondary"}
+                className="gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh Wallet
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Bridge Balances</CardTitle>
+              <CardDescription>Liquidity held by the bridge</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-sm font-medium text-muted-foreground mb-1">
+                  Locked NIGHT (getLockedNIGHT)
+                </p>
+                <p className="text-sm font-mono">
+                  {formatBigint(derivedState?.query.lockedNIGHT)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-sm font-medium text-muted-foreground mb-1">
+                  Fee Vault
+                </p>
+                <p className="text-sm font-mono">
+                  {formatBigint(derivedState?.query.feeVault)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-sm font-medium text-muted-foreground mb-1">
+                  Pending Withdrawal (wallet)
+                </p>
+                <p className="text-sm font-mono">
+                  {formatBigint(derivedState?.query.pendingWithdrawal)}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
               <CardTitle>Deposit to L2</CardTitle>
               <CardDescription>
                 Send NIGHT from L1 into the cross-domain queue
@@ -262,7 +500,7 @@ export const Counter = () => {
                   onChange={(event) =>
                     setDepositRecipientInput(event.target.value)
                   }
-                  placeholder="L2 recipient (hex, 32 bytes)"
+                  placeholder="L2 recipient (hex or bech32)"
                   className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                 />
                 <div className="flex flex-wrap gap-2">
@@ -353,7 +591,7 @@ export const Counter = () => {
                   onChange={(event) =>
                     setWithdrawRecipientInput(event.target.value)
                   }
-                  placeholder="Recipient (hex, 32 bytes)"
+                  placeholder="Recipient (hex or bech32)"
                   className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                 />
                 <input
@@ -409,11 +647,152 @@ export const Counter = () => {
           </Card>
         </div>
 
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold text-foreground">
+              Unshielded NIGHT
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Use unshielded balances for L1 deposits and withdrawal claims
+            </p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Unshielded Deposit to L2</CardTitle>
+                <CardDescription>
+                  Send unshielded NIGHT into the cross-domain queue
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 gap-3">
+                  <input
+                    value={unshieldedDepositAmountInput}
+                    onChange={(event) =>
+                      setUnshieldedDepositAmountInput(event.target.value)
+                    }
+                    placeholder="Amount (bigint)"
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                  <input
+                    value={unshieldedDepositRecipientInput}
+                    onChange={(event) =>
+                      setUnshieldedDepositRecipientInput(event.target.value)
+                    }
+                    placeholder="L2 recipient (hex or bech32)"
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        walletRecipientHex &&
+                        setUnshieldedDepositRecipientInput(walletRecipientHex)
+                      }
+                      disabled={!walletRecipientHex}
+                    >
+                      Use wallet recipient
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        setUnshieldedDepositTimestampInput(nowSeconds())
+                      }
+                    >
+                      Use current time
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      value={unshieldedDepositGasLimitInput}
+                      onChange={(event) =>
+                        setUnshieldedDepositGasLimitInput(event.target.value)
+                      }
+                      placeholder="Gas limit"
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    />
+                    <input
+                      value={unshieldedDepositTimestampInput}
+                      onChange={(event) =>
+                        setUnshieldedDepositTimestampInput(event.target.value)
+                      }
+                      placeholder="Timestamp (unix seconds)"
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Uses unshielded NIGHT balance in your wallet.
+                </p>
+                <Button
+                  onClick={submitUnshieldedDeposit}
+                  disabled={!deployedContractAPI}
+                  variant={deployedContractAPI ? "default" : "secondary"}
+                >
+                  Submit depositNIGHTUnshielded
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Claim Unshielded Withdrawal</CardTitle>
+                <CardDescription>
+                  Claim a verified withdrawal to an L1 recipient
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 gap-3">
+                  <input
+                    value={unshieldedClaimRecipientInput}
+                    onChange={(event) =>
+                      setUnshieldedClaimRecipientInput(event.target.value)
+                    }
+                    placeholder="Recipient (hex or bech32)"
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                  <input
+                    value={unshieldedClaimAmountInput}
+                    onChange={(event) =>
+                      setUnshieldedClaimAmountInput(event.target.value)
+                    }
+                    placeholder="Amount (bigint)"
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      walletUnshieldedHex &&
+                      setUnshieldedClaimRecipientInput(walletUnshieldedHex)
+                    }
+                    disabled={!walletUnshieldedHex}
+                  >
+                    Use wallet unshielded address
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Requires a pending withdrawal proof to be relayed.
+                </p>
+                <Button
+                  onClick={submitUnshieldedClaim}
+                  disabled={!deployedContractAPI}
+                  variant={deployedContractAPI ? "default" : "secondary"}
+                >
+                  Submit claimL1WithdrawalUnshielded
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
               <CardTitle>Rollup State</CardTitle>
-              <CardDescription>Queue pointers and liquidity</CardDescription>
+              <CardDescription>Queue pointers</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="rounded-lg border border-border bg-muted/30 p-3">
@@ -430,30 +809,6 @@ export const Counter = () => {
                 </p>
                 <p className="text-sm font-mono">
                   {formatBigint(derivedState?.query.nextUnfinalizedQueueIndex)}
-                </p>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <p className="text-sm font-medium text-muted-foreground mb-1">
-                  Locked NIGHT
-                </p>
-                <p className="text-sm font-mono">
-                  {formatBigint(derivedState?.query.lockedNIGHT)}
-                </p>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <p className="text-sm font-medium text-muted-foreground mb-1">
-                  Fee Vault
-                </p>
-                <p className="text-sm font-mono">
-                  {formatBigint(derivedState?.query.feeVault)}
-                </p>
-              </div>
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
-                <p className="text-sm font-medium text-muted-foreground mb-1">
-                  Pending Withdrawal (wallet)
-                </p>
-                <p className="text-sm font-mono">
-                  {formatBigint(derivedState?.query.pendingWithdrawal)}
                 </p>
               </div>
             </CardContent>

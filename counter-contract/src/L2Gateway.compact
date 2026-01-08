@@ -24,15 +24,15 @@ module L2Gateway {
   export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;
 
   // Legacy deposit tracking (for L2 test contract)
-  ledger depositCounter: Uint<64>;
-  ledger depositedCoins: Map<Uint<64>, QualifiedShieldedCoinInfo>;
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // ledger depositCounter: Uint<64>;
+  // ledger depositedCoins: Map<Uint<64>, QualifiedShieldedCoinInfo>;
 
   // ============================================================================
   // INITIALIZATION
   // ============================================================================
 
   export circuit initialize(): [] {
-    depositCounter = 0 as Uint<64>;
   }
 
   // ============================================================================
@@ -74,47 +74,48 @@ module L2Gateway {
   // ============================================================================
   // LEGACY DEPOSIT (for L2 test contract compatibility)
   // ============================================================================
-
-  export circuit legacyDeposit(coin: ShieldedCoinInfo): Uint<64> {
-    assert(coin.color == nativeToken(), "Only nativeToken deposits supported");
-
-    receiveShielded(coin);
-    depositedCoins.insertCoin(depositCounter, coin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
-    
-    const pk = disclose(ownPublicKey());
-    const amount = disclose(coin.value);
-    credit(pk, amount);
-
-    const id = depositCounter;
-    depositCounter = (depositCounter + (1 as Uint<64>)) as Uint<64>;
-    return id;
-  }
-
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  //
+  // export circuit legacyDeposit(coin: ShieldedCoinInfo): Uint<64> {
+  //   assert(coin.color == nativeToken(), "Only nativeToken deposits supported");
+  //
+  //   receiveShielded(coin);
+  //   depositedCoins.insertCoin(depositCounter, coin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
+  //   
+  //   const pk = disclose(ownPublicKey());
+  //   const amount = disclose(coin.value);
+  //   credit(pk, amount);
+  //
+  //   const id = depositCounter;
+  //   depositCounter = (depositCounter + (1 as Uint<64>)) as Uint<64>;
+  //   return id;
+  // }
+  //
   // ============================================================================
   // LEGACY WITHDRAW (for L2 test contract compatibility)
   // ============================================================================
-
-  export struct WithdrawInfo {
-    depositId: Uint<64>;
-  }
-
-  export circuit legacyWithdraw(wi: WithdrawInfo, signerPk: CurvePoint): [] {
-    const receiver = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-
-    // send coin to L1 receiver
-    assert(depositedCoins.member(wi.depositId), "Invalid depositId");
-    const coin = depositedCoins.lookup(wi.depositId);
-    sendShielded(coin, receiver, coin.value);
-
-    // update balance tracking
-    assert(balances.member(receiver.left), "No balance for receiver");
-    const oldBalance = balances.lookup(receiver.left);
-    assert(oldBalance >= coin.value, "Insufficient balance");
-    const newBalance = (oldBalance - coin.value) as Uint<128>;
-    if (newBalance == (0 as Uint<128>)) {
-      balances.remove(receiver.left);
-    } else {
-      balances.insert(receiver.left, newBalance);
-    }
-  }
+  //
+  // export struct WithdrawInfo {
+  //   depositId: Uint<64>;
+  // }
+  //
+  // export circuit legacyWithdraw(wi: WithdrawInfo, signerPk: CurvePoint): [] {
+  //   const receiver = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+  //
+  //   // send coin to L1 receiver
+  //   assert(depositedCoins.member(wi.depositId), "Invalid depositId");
+  //   const coin = depositedCoins.lookup(wi.depositId);
+  //   sendShielded(coin, receiver, coin.value);
+  //
+  //   // update balance tracking
+  //   assert(balances.member(receiver.left), "No balance for receiver");
+  //   const oldBalance = balances.lookup(receiver.left);
+  //   assert(oldBalance >= coin.value, "Insufficient balance");
+  //   const newBalance = (oldBalance - coin.value) as Uint<128>;
+  //   if (newBalance == (0 as Uint<128>)) {
+  //     balances.remove(receiver.left);
+  //   } else {
+  //     balances.insert(receiver.left, newBalance);
+  //   }
+  // }
 }

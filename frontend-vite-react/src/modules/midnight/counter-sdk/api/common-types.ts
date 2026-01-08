@@ -23,7 +23,9 @@ export type DeployedBridgeContract =
 export type UserAction = {
   refresh: string | undefined;
   depositNIGHT: string | undefined;
+  depositNIGHTUnshielded: string | undefined;
   withdrawNIGHT: string | undefined;
+  claimL1WithdrawalUnshielded: string | undefined;
 };
 
 export type QueryState = {
@@ -60,7 +62,9 @@ export const emptyState: DerivedState = {
   turns: {
     refresh: undefined,
     depositNIGHT: undefined,
+    depositNIGHTUnshielded: undefined,
     withdrawNIGHT: undefined,
+    claimL1WithdrawalUnshielded: undefined,
   },
 };
 

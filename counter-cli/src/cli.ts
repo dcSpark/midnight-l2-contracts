@@ -2,7 +2,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface, type Interface } from 'node:readline/promises';
 import { type Logger } from 'pino';
 import { type StartedDockerComposeEnvironment, type DockerComposeEnvironment } from 'testcontainers';
-import { type DeployedL2Contract, type L2Providers } from './common-types';
+import { type DeployedBridgeContract, type BridgeProviders } from './common-types';
 import { type Config, UndeployedConfig } from './config';
 import * as api from './api';
 import type { WalletContext } from './api';
@@ -18,23 +18,26 @@ const GENESIS_MINT_WALLET_SEED = '0000000000000000000000000000000000000000000000
 
 const DEPLOY_OR_JOIN_QUESTION = `
 You can do one of the following:
-  1. Deploy a new L2 simulation contract
+  1. Deploy a new bridge contract
   2. Join an existing contract
   3. Exit
 Which would you like to do? `;
 
 const MAIN_LOOP_QUESTION = `
 You can do one of the following:
-  1. Display ledger state
+  1. Display bridge state
   2. Exit
 Which would you like to do? `;
 
-const join = async (providers: L2Providers, rli: Interface): Promise<DeployedL2Contract> => {
+const join = async (providers: BridgeProviders, rli: Interface): Promise<DeployedBridgeContract> => {
   const contractAddress = await rli.question('What is the contract address (in hex)? ');
   return await api.joinContract(providers, contractAddress);
 };
 
-const deployOrJoin = async (providers: L2Providers, rli: Interface): Promise<DeployedL2Contract | null> => {
+const deployOrJoin = async (
+  providers: BridgeProviders,
+  rli: Interface,
+): Promise<DeployedBridgeContract | null> => {
   while (true) {
     const choice = await rli.question(DEPLOY_OR_JOIN_QUESTION);
     switch (choice) {
@@ -51,16 +54,16 @@ const deployOrJoin = async (providers: L2Providers, rli: Interface): Promise<Dep
   }
 };
 
-const mainLoop = async (providers: L2Providers, rli: Interface): Promise<void> => {
-  const l2Contract = await deployOrJoin(providers, rli);
-  if (l2Contract === null) {
+const mainLoop = async (providers: BridgeProviders, rli: Interface): Promise<void> => {
+  const bridgeContract = await deployOrJoin(providers, rli);
+  if (bridgeContract === null) {
     return;
   }
   while (true) {
     const choice = await rli.question(MAIN_LOOP_QUESTION);
     switch (choice) {
       case '1':
-        await api.displayLedgerState(providers, l2Contract);
+        await api.displayBridgeState(providers, bridgeContract);
         break;
       case '2':
         logger.info('Exiting...');

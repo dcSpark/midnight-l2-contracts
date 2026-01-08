@@ -1,12 +1,11 @@
 import path from 'path';
 import * as api from '../api';
-import { type L2Providers } from '../common-types';
+import { type BridgeProviders } from '../common-types';
 import { currentDir } from '../config';
 import { createLogger } from '../logger';
 import { TestEnvironment } from './simulators/simulator';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import 'dotenv/config';
-import * as Rx from 'rxjs';
 
 let logDir: string;
 const network = process.env.TEST_ENV || 'undeployed';
@@ -20,10 +19,11 @@ const logger = await createLogger(logDir);
 describe('API', () => {
   let testEnvironment: TestEnvironment;
   let wallet: api.WalletContext;
-  let providers: L2Providers;
+  let providers: BridgeProviders;
 
   beforeAll(
     async () => {
+      logger.info('network', network);
       api.setLogger(logger);
       testEnvironment = new TestEnvironment(logger);
       const testConfiguration = await testEnvironment.start();
@@ -38,16 +38,19 @@ describe('API', () => {
     await testEnvironment.shutdown();
   });
 
-  it('should deploy the contract and read ledger state [@slow]', async () => {
-    const l2ContractDeployed = await api.deploy(providers, { privateState: 0 });
-    expect(l2ContractDeployed).not.toBeNull();
+  it('should deploy the contract and read bridge state [@slow]', async () => {
+    const bridgeContractDeployed = await api.deploy(providers, { privateState: 0 });
+    expect(bridgeContractDeployed).not.toBeNull();
 
-    const state = await api.displayLedgerState(providers, l2ContractDeployed);
-    if (state.ledger === null) {
-      throw new Error('Expected ledger state to be available after deployment.');
+    const state = await api.displayBridgeState(providers, bridgeContractDeployed);
+    if (state.state === null) {
+      throw new Error('Expected bridge state to be available after deployment.');
     }
-    expect(state.ledger.signers.length).toBe(3);
-    expect(state.ledger.stateRoot.length).toBe(32);
+    expect(state.state.nextCrossDomainMessageIndex).toBe(1n);
+    expect(state.state.nextUnfinalizedQueueIndex).toBe(1n);
+    expect(state.state.lockedNIGHT).toBe(0n);
+    expect(state.state.feeVault).toBe(0n);
+    expect(state.state.withdrawMessageCount).toBe(0n);
   });
 
   it('Wallet Funcitonalities', async () => {

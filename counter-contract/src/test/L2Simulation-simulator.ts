@@ -19,14 +19,13 @@ import {
   type CurvePoint,
   sampleContractAddress
 } from "@midnight-ntwrk/compact-runtime";
-import { encodeContractAddress, nativeToken } from "@midnight-ntwrk/ledger-v6";
 import {
   Contract,
   type Ledger,
   ledger,
   pureCircuits,
   type Signature,
-  WithdrawInfo
+  type WithdrawNIGHTResult
 } from "../managed/L2Simulation/contract/index.js";
 import { type L2PrivateState, witnesses } from "../witnesses.js";
 
@@ -89,13 +88,6 @@ export class L2Simulator {
     );
   }
 
-  public signWithdraw(wi: WithdrawInfo, signerIndex: number): Signature {
-    return this._signWithGrinding(
-      (k) => pureCircuits.signWithdraw(wi, this.signers[signerIndex].sk, k),
-      signerIndex
-    );
-  }
-
   private _signWithGrinding(
     _signFn: (_: bigint) => Signature,
     signerIndex: number
@@ -126,31 +118,33 @@ export class L2Simulator {
     return ledger(this.circuitContext.currentQueryContext.state);
   }
 
-  public deposit(amount: bigint, l2_receiver: Uint8Array): bigint {
-    const result = this.contract.impureCircuits.deposit(
-      this.circuitContext,
-      {
-        nonce: new Uint8Array(32),
-        color: encodeContractAddress(nativeToken().raw),
-        value: amount
-      },
-      l2_receiver
-    );
-    this.circuitContext = result.context;
-    return result.result;
-  }
-
-  public withdraw(withdrawInfo: WithdrawInfo, signature: Signature): void {
-    this.circuitContext = this.contract.impureCircuits.withdraw(
-      this.circuitContext,
-      withdrawInfo,
-      signature
-    ).context;
-  }
-
   public getBalance(user: Uint8Array): bigint {
     return this.contract.impureCircuits.getBalance(this.circuitContext, {
       bytes: user
     }).result;
+  }
+
+  public getWithdrawRoot(): Uint8Array {
+    return this.contract.impureCircuits.getWithdrawRoot(this.circuitContext)
+      .result;
+  }
+
+  public getWithdrawMessageCount(): bigint {
+    return this.contract.impureCircuits.getWithdrawMessageCount(
+      this.circuitContext
+    ).result;
+  }
+
+  public withdrawNIGHT(
+    recipient: Uint8Array,
+    amount: bigint
+  ): WithdrawNIGHTResult {
+    const result = this.contract.impureCircuits.withdrawNIGHT(
+      this.circuitContext,
+      recipient,
+      amount
+    );
+    this.circuitContext = result.context;
+    return result.result;
   }
 }
