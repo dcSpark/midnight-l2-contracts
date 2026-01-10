@@ -37,18 +37,17 @@ jobs:
         run: npm ci
 
       - name: Compile and test contract
-        working-directory: contract
+        working-directory: counter-contract
         run: |
           npm run lint
           npm run compact
           npm run typecheck
-          npm run build
-          npm run test
+          npm run test:compile
 
       - name: Compile cli
-        working-directory: cli
+        working-directory: counter-cli
         run: |
           npm run lint
           npm run typecheck
           npm run build
-          npm run test-api
+          npm run test-undeployed
