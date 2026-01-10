@@ -15,6 +15,7 @@
     "build": "turbo run build",
     "build-production": "cd counter-contract && npm run build && cd ../frontend-vite-react && npm run build",    
     "setup-standalone": "cd counter-cli && npm run setup-undeployed",
+    "deploy-undeployed": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_COMPILER_OPTIONS='{\"module\":\"NodeNext\",\"moduleResolution\":\"NodeNext\"}' node --experimental-specifier-resolution=node --loader ts-node/esm counter-cli/src/deploy-undeployed.ts",
     "dev:frontend": "cd frontend-vite-react && npm run dev",    
     "lint": "turbo run lint"      
   },
