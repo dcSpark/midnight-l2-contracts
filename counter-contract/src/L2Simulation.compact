@@ -1,0 +1,182 @@
+// L2 Contract
+//
+// Simplified L2 state contract for testing:
+// - State root tracking with oracle signature verification
+// - Balance tracking and deposit/withdraw operations
+// - Withdrawal message queue integration
+//
+// This contract is used for L2 simulation tests.
+
+pragma language_version >= 0.16;
+
+import CompactStandardLibrary;
+import Signer;
+import ProtocolTypes prefix PT_;
+import L2Gateway prefix GW_;
+import L2Messenger prefix MSG_;
+import L2MessageQueue prefix MQ_;
+
+// ============================================================================
+// RE-EXPORTS
+// ============================================================================
+
+export { derivePk, Signature };
+
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export struct WithdrawInfo {
+//   depositId: Uint<64>;
+// }
+
+export struct WithdrawNIGHTResult {
+  nonce: Uint<64>;
+  messageHash: Bytes<32>;
+  leafHash: Bytes<32>;
+}
+
+// ============================================================================
+// LEDGER STATE
+// ============================================================================
+
+// Oracle signers (3 signers for threshold signatures)
+export sealed ledger signers: Vector<3, CurvePoint>;
+
+// Current L2 state root
+export ledger stateRoot: Bytes<32>;
+
+// ============================================================================
+// CONSTRUCTOR
+// ============================================================================
+
+constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
+  signers = disclose(newSigners);
+  stateRoot = disclose(initialStateRoot);
+  
+  GW_initialize();
+  MSG_initialize();
+  MQ_initialize();
+}
+
+// ============================================================================
+// SIGNING HELPERS (Pure circuits)
+// ============================================================================
+
+export pure circuit signStateRootUpdate(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
+  return sign<Bytes<32>>(msg, sk, nonce);
+}
+
+export pure circuit verifyStateRootSignature(msg: Bytes<32>, signature: Signature): Boolean {
+  return verifySignature<Bytes<32>>(msg, signature);
+}
+
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export pure circuit signWithdraw(msg: WithdrawInfo, sk: Field, nonce: Field): Signature {
+//   return sign<WithdrawInfo>(msg, sk, nonce);
+// }
+//
+// export pure circuit verifyWithdraw(msg: WithdrawInfo, signature: Signature): Boolean {
+//   return verifySignature<WithdrawInfo>(msg, signature);
+// }
+
+// Protocol helpers
+export pure circuit dsL2ToL1Withdraw(): Bytes<32> { return PT_dsL2ToL1Withdraw(); }
+export pure circuit dsL2WithdrawLeaf(): Bytes<32> { return PT_dsL2WithdrawLeaf(); }
+export pure circuit u64ToBytes32LE(x: Uint<64>): Bytes<32> { return PT_u64ToBytes32LE(x); }
+export pure circuit u128ToBytes32LE(x: Uint<128>): Bytes<32> { return PT_u128ToBytes32LE(x); }
+
+export pure circuit hashL2ToL1Withdraw(
+  sender: Bytes<32>,
+  recipient: Bytes<32>,
+  amount: Uint<128>,
+  nonce: Uint<64>
+): Bytes<32> {
+  return MSG_hashWithdrawMessage(sender, recipient, amount, nonce);
+}
+
+export pure circuit hashWithdrawLeaf(messageHash: Bytes<32>): Bytes<32> {
+  return MSG_hashLeaf(messageHash);
+}
+
+export pure circuit hashMerkleNode(left: Bytes<32>, right: Bytes<32>): Bytes<32> {
+  return PT_hashMerkleNode(left, right);
+}
+
+// ============================================================================
+// IMPURE CIRCUITS
+// ============================================================================
+
+// Check if a public key is a registered signer
+export circuit isSigner(pk_: CurvePoint): Boolean {
+  const pk = disclose(pk_);
+  return pk == signers[0] || pk == signers[1] || pk == signers[2];
+}
+
+// Update the state root (requires valid signature from a signer)
+export circuit updateStateRoot(newRoot: Bytes<32>, sig: Signature): [] {
+  const root = disclose(newRoot);
+  assert(verifySignature<Bytes<32>>(root, sig), "Invalid signature");
+  const signerPk = disclose(sig).pk;
+  assert(isSigner(signerPk), "Not a registered signer");
+  stateRoot = root;
+}
+
+// Deposit: receive coin, credit L2 balance, store coin
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit deposit(coin_: ShieldedCoinInfo, l2_receiver: Bytes<32>): Uint<64> {
+//   const coin = disclose(coin_);
+//   return GW_legacyDeposit(coin);
+// }
+//
+// Withdraw: verify signature, send coin back to caller
+// NOTE: Shielded flow disabled for unshielded-only pipeline.
+// export circuit withdraw(wi_: WithdrawInfo, sig: Signature): [] {
+//   const wi = disclose(wi_);
+//   assert(verifySignature<WithdrawInfo>(wi, sig), "Invalid signature");
+//   const signerPk = disclose(sig).pk;
+//   // Convert to L2Gateway's WithdrawInfo
+//   const gwWi = GW_WithdrawInfo { depositId: wi.depositId };
+//   GW_legacyWithdraw(gwWi, signerPk);
+// }
+
+// Get balance for a user
+export circuit getBalance(user_: ZswapCoinPublicKey): Uint<128> {
+  const user = disclose(user_);
+  return GW_getBalance(user);
+}
+
+// Get the current withdraw root
+export circuit getWithdrawRoot(): Bytes<32> {
+  return MQ_getWithdrawRoot();
+}
+
+// Get the current message count
+export circuit getWithdrawMessageCount(): Uint<64> {
+  return MQ_getMessageCount();
+}
+
+// Withdraw NIGHT via the L2 message queue
+export circuit withdrawNIGHT(recipient_: Bytes<32>, amount_: Uint<128>): WithdrawNIGHTResult {
+  const recipient = disclose(recipient_);
+  const amount = disclose(amount_);
+
+  const senderPk = disclose(ownPublicKey());
+  const senderBytes = senderPk.bytes;
+
+  // Debit balance
+  GW_debit(senderPk, amount);
+
+  // Get nonce (current message count)
+  const nonce = MQ_getMessageCount();
+
+  // Compute hashes
+  const hashes = MSG_computeWithdrawHashes(senderBytes, recipient, amount, nonce);
+
+  // Append to queue
+  const appendedIndex = MQ_appendLeaf(hashes.leafHash);
+  assert(appendedIndex == nonce, "Queue index mismatch");
+
+  return WithdrawNIGHTResult {
+    nonce: nonce,
+    messageHash: hashes.messageHash,
+    leafHash: hashes.leafHash
+  };
+}

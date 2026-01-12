@@ -1,0 +1,17 @@
+import { Bridge, type BridgePrivateState } from 'counter-contract/browser';
+import type { ImpureCircuitId, MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
+import type { DeployedContract, FoundContract } from '@midnight-ntwrk/midnight-js-contracts';
+
+export type BridgeCircuits = ImpureCircuitId<Bridge.Contract<BridgePrivateState>>;
+
+export const BridgePrivateStateId = 'bridgePrivateState';
+
+export type BridgeProviders = MidnightProviders<
+  BridgeCircuits,
+  typeof BridgePrivateStateId,
+  BridgePrivateState
+>;
+
+export type BridgeContract = Bridge.Contract<BridgePrivateState>;
+
+export type DeployedBridgeContract = DeployedContract<BridgeContract> | FoundContract<BridgeContract>;

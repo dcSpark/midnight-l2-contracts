@@ -1,0 +1,235 @@
+// L2MessageQueue Module
+//
+// Implements an append-only Merkle tree for L2→L1 withdrawal messages.
+// Uses an incremental algorithm with cached branch hashes.
+//
+// DESIGN:
+// - 16 levels = supports 65536 messages
+// - Empty leaves are 0x00...00 (32 zero bytes)
+// - Node hash: H(left || right) via ProtocolTypes
+// - Bit decomposition provided via witness, verified in circuit
+//
+// CONSENSUS CRITICAL: withdrawRoot is verified by L1 during batch finalization.
+
+pragma language_version >= 0.16;
+
+module L2MessageQueue {
+
+  import CompactStandardLibrary;
+  import ProtocolTypes prefix PT_;
+
+  // ============================================================================
+  // LEDGER STATE
+  // ============================================================================
+
+  // Number of messages in the queue (also next leaf index)
+  export ledger messageCount: Uint<64>;
+
+  // Current Merkle root of the withdrawal tree
+  export ledger withdrawRoot: Bytes<32>;
+
+  // Cached branch hashes (16 levels)
+  ledger branch0: Bytes<32>;
+  ledger branch1: Bytes<32>;
+  ledger branch2: Bytes<32>;
+  ledger branch3: Bytes<32>;
+  ledger branch4: Bytes<32>;
+  ledger branch5: Bytes<32>;
+  ledger branch6: Bytes<32>;
+  ledger branch7: Bytes<32>;
+  ledger branch8: Bytes<32>;
+  ledger branch9: Bytes<32>;
+  ledger branch10: Bytes<32>;
+  ledger branch11: Bytes<32>;
+  ledger branch12: Bytes<32>;
+  ledger branch13: Bytes<32>;
+  ledger branch14: Bytes<32>;
+  ledger branch15: Bytes<32>;
+
+  // ============================================================================
+  // HELPERS
+  // ============================================================================
+
+  pure circuit zeroBytes(): Bytes<32> {
+    return pad(32, "");
+  }
+
+  pure circuit hashNode(left: Bytes<32>, right: Bytes<32>): Bytes<32> {
+    return PT_hashMerkleNode(left, right);
+  }
+
+  // Zero hashes for each level (empty subtree roots)
+  export pure circuit zeroHash0(): Bytes<32> { return hashNode(zeroBytes(), zeroBytes()); }
+  export pure circuit zeroHash1(): Bytes<32> { const z = zeroHash0(); return hashNode(z, z); }
+  export pure circuit zeroHash2(): Bytes<32> { const z = zeroHash1(); return hashNode(z, z); }
+  export pure circuit zeroHash3(): Bytes<32> { const z = zeroHash2(); return hashNode(z, z); }
+  export pure circuit zeroHash4(): Bytes<32> { const z = zeroHash3(); return hashNode(z, z); }
+  export pure circuit zeroHash5(): Bytes<32> { const z = zeroHash4(); return hashNode(z, z); }
+  export pure circuit zeroHash6(): Bytes<32> { const z = zeroHash5(); return hashNode(z, z); }
+  export pure circuit zeroHash7(): Bytes<32> { const z = zeroHash6(); return hashNode(z, z); }
+  export pure circuit zeroHash8(): Bytes<32> { const z = zeroHash7(); return hashNode(z, z); }
+  export pure circuit zeroHash9(): Bytes<32> { const z = zeroHash8(); return hashNode(z, z); }
+  export pure circuit zeroHash10(): Bytes<32> { const z = zeroHash9(); return hashNode(z, z); }
+  export pure circuit zeroHash11(): Bytes<32> { const z = zeroHash10(); return hashNode(z, z); }
+  export pure circuit zeroHash12(): Bytes<32> { const z = zeroHash11(); return hashNode(z, z); }
+  export pure circuit zeroHash13(): Bytes<32> { const z = zeroHash12(); return hashNode(z, z); }
+  export pure circuit zeroHash14(): Bytes<32> { const z = zeroHash13(); return hashNode(z, z); }
+  export pure circuit zeroHash15(): Bytes<32> { const z = zeroHash14(); return hashNode(z, z); }
+
+  // ============================================================================
+  // BIT DECOMPOSITION
+  // ============================================================================
+
+  // Witness for index bits (provided by off-chain)
+  witness indexBits(index: Uint<64>): Vector<16, Boolean>;
+
+  // Verify bit decomposition using Field arithmetic
+  export pure circuit verifyBits(bits: Vector<16, Boolean>, index: Uint<64>): Boolean {
+    const sum: Field =
+      (bits[0] as Field) * (1 as Field) +
+      (bits[1] as Field) * (2 as Field) +
+      (bits[2] as Field) * (4 as Field) +
+      (bits[3] as Field) * (8 as Field) +
+      (bits[4] as Field) * (16 as Field) +
+      (bits[5] as Field) * (32 as Field) +
+      (bits[6] as Field) * (64 as Field) +
+      (bits[7] as Field) * (128 as Field) +
+      (bits[8] as Field) * (256 as Field) +
+      (bits[9] as Field) * (512 as Field) +
+      (bits[10] as Field) * (1024 as Field) +
+      (bits[11] as Field) * (2048 as Field) +
+      (bits[12] as Field) * (4096 as Field) +
+      (bits[13] as Field) * (8192 as Field) +
+      (bits[14] as Field) * (16384 as Field) +
+      (bits[15] as Field) * (32768 as Field);
+    return sum == (index as Field);
+  }
+
+  // ============================================================================
+  // INITIALIZATION
+  // ============================================================================
+
+  export circuit initialize(): [] {
+    messageCount = 0 as Uint<64>;
+    withdrawRoot = zeroHash15();
+    branch0 = zeroBytes();
+    branch1 = zeroBytes();
+    branch2 = zeroBytes();
+    branch3 = zeroBytes();
+    branch4 = zeroBytes();
+    branch5 = zeroBytes();
+    branch6 = zeroBytes();
+    branch7 = zeroBytes();
+    branch8 = zeroBytes();
+    branch9 = zeroBytes();
+    branch10 = zeroBytes();
+    branch11 = zeroBytes();
+    branch12 = zeroBytes();
+    branch13 = zeroBytes();
+    branch14 = zeroBytes();
+    branch15 = zeroBytes();
+  }
+
+  // ============================================================================
+  // APPEND OPERATION
+  // ============================================================================
+
+  // Append a leaf to the queue. Returns the index.
+  export circuit appendLeaf(leafHash: Bytes<32>): Uint<64> {
+    const index = messageCount;
+
+    // Capacity guard
+    assert(index < (65536 as Uint<64>), "Message queue full");
+
+    // Get and verify bit decomposition
+    const bits = disclose(indexBits(index));
+    assert(verifyBits(bits, index), "Invalid bit decomposition");
+
+    const b0 = bits[0];
+    const b1 = bits[1];
+    const b2 = bits[2];
+    const b3 = bits[3];
+    const b4 = bits[4];
+    const b5 = bits[5];
+    const b6 = bits[6];
+    const b7 = bits[7];
+    const b8 = bits[8];
+    const b9 = bits[9];
+    const b10 = bits[10];
+    const b11 = bits[11];
+    const b12 = bits[12];
+    const b13 = bits[13];
+    const b14 = bits[14];
+    const b15 = bits[15];
+
+    // Level 0
+    if (!b0) { branch0 = leafHash; }
+    const next0 = b0 ? hashNode(branch0, leafHash) : hashNode(leafHash, zeroBytes());
+
+    // Level 1-15
+    if (!b1) { branch1 = next0; }
+    const next1 = b1 ? hashNode(branch1, next0) : hashNode(next0, zeroHash0());
+
+    if (!b2) { branch2 = next1; }
+    const next2 = b2 ? hashNode(branch2, next1) : hashNode(next1, zeroHash1());
+
+    if (!b3) { branch3 = next2; }
+    const next3 = b3 ? hashNode(branch3, next2) : hashNode(next2, zeroHash2());
+
+    if (!b4) { branch4 = next3; }
+    const next4 = b4 ? hashNode(branch4, next3) : hashNode(next3, zeroHash3());
+
+    if (!b5) { branch5 = next4; }
+    const next5 = b5 ? hashNode(branch5, next4) : hashNode(next4, zeroHash4());
+
+    if (!b6) { branch6 = next5; }
+    const next6 = b6 ? hashNode(branch6, next5) : hashNode(next5, zeroHash5());
+
+    if (!b7) { branch7 = next6; }
+    const next7 = b7 ? hashNode(branch7, next6) : hashNode(next6, zeroHash6());
+
+    if (!b8) { branch8 = next7; }
+    const next8 = b8 ? hashNode(branch8, next7) : hashNode(next7, zeroHash7());
+
+    if (!b9) { branch9 = next8; }
+    const next9 = b9 ? hashNode(branch9, next8) : hashNode(next8, zeroHash8());
+
+    if (!b10) { branch10 = next9; }
+    const next10 = b10 ? hashNode(branch10, next9) : hashNode(next9, zeroHash9());
+
+    if (!b11) { branch11 = next10; }
+    const next11 = b11 ? hashNode(branch11, next10) : hashNode(next10, zeroHash10());
+
+    if (!b12) { branch12 = next11; }
+    const next12 = b12 ? hashNode(branch12, next11) : hashNode(next11, zeroHash11());
+
+    if (!b13) { branch13 = next12; }
+    const next13 = b13 ? hashNode(branch13, next12) : hashNode(next12, zeroHash12());
+
+    if (!b14) { branch14 = next13; }
+    const next14 = b14 ? hashNode(branch14, next13) : hashNode(next13, zeroHash13());
+
+    if (!b15) { branch15 = next14; }
+    const next15 = b15 ? hashNode(branch15, next14) : hashNode(next14, zeroHash14());
+
+    // Update root and count
+    withdrawRoot = next15;
+    messageCount = ((messageCount + (1 as Uint<64>)) as Uint<64>);
+
+    return index;
+  }
+
+  // ============================================================================
+  // QUERIES
+  // ============================================================================
+
+  export circuit getWithdrawRoot(): Bytes<32> {
+    return withdrawRoot;
+  }
+
+  export circuit getMessageCount(): Uint<64> {
+    return messageCount;
+  }
+}
+
+

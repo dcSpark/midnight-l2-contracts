@@ -1,0 +1,121 @@
+// L2Gateway Module
+//
+// Handles NIGHT token balance tracking on L2.
+// Provides debit/credit operations for the bridge.
+//
+// RESPONSIBILITIES:
+// - Track L2 NIGHT balances per user
+// - Debit balances on withdrawal
+// - Credit balances on deposit finalization
+// - Legacy deposit/withdraw support (for L2 test contract compatibility)
+
+pragma language_version >= 0.16;
+
+module L2Gateway {
+
+  import CompactStandardLibrary;
+  import Signer;
+
+  // ============================================================================
+  // LEDGER STATE
+  // ============================================================================
+
+  // Balance tracking for L2 NIGHT
+  export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;
+
+  // Legacy deposit tracking (for L2 test contract)
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  // ledger depositCounter: Uint<64>;
+  // ledger depositedCoins: Map<Uint<64>, QualifiedShieldedCoinInfo>;
+
+  // ============================================================================
+  // INITIALIZATION
+  // ============================================================================
+
+  export circuit initialize(): [] {
+  }
+
+  // ============================================================================
+  // CORE OPERATIONS
+  // ============================================================================
+
+  // Debit (burn) from L2 balance - used by withdrawNIGHT
+  export circuit debit(senderPk: ZswapCoinPublicKey, amount: Uint<128>): [] {
+    assert(balances.member(senderPk), "No balance for sender");
+    const oldBalance = balances.lookup(senderPk);
+    assert(oldBalance >= amount, "Insufficient balance");
+
+    const newBalance = (oldBalance - amount) as Uint<128>;
+    if (newBalance == (0 as Uint<128>)) {
+      balances.remove(senderPk);
+    } else {
+      balances.insert(senderPk, newBalance);
+    }
+  }
+
+  // Credit (mint) to L2 balance - used by finalizeDeposit
+  export circuit credit(recipientPk: ZswapCoinPublicKey, amount: Uint<128>): [] {
+    if (balances.member(recipientPk)) {
+      const old = balances.lookup(recipientPk);
+      balances.insert(recipientPk, (old + amount) as Uint<128>);
+    } else {
+      balances.insert(recipientPk, amount);
+    }
+  }
+
+  // ============================================================================
+  // QUERIES
+  // ============================================================================
+
+  export circuit getBalance(user: ZswapCoinPublicKey): Uint<128> {
+    return balances.member(user) ? balances.lookup(user) : (0 as Uint<128>);
+  }
+
+  // ============================================================================
+  // LEGACY DEPOSIT (for L2 test contract compatibility)
+  // ============================================================================
+  // NOTE: Shielded flow disabled for unshielded-only pipeline.
+  //
+  // export circuit legacyDeposit(coin: ShieldedCoinInfo): Uint<64> {
+  //   assert(coin.color == nativeToken(), "Only nativeToken deposits supported");
+  //
+  //   receiveShielded(coin);
+  //   depositedCoins.insertCoin(depositCounter, coin, right<ZswapCoinPublicKey, ContractAddress>(kernel.self()));
+  //   
+  //   const pk = disclose(ownPublicKey());
+  //   const amount = disclose(coin.value);
+  //   credit(pk, amount);
+  //
+  //   const id = depositCounter;
+  //   depositCounter = (depositCounter + (1 as Uint<64>)) as Uint<64>;
+  //   return id;
+  // }
+  //
+  // ============================================================================
+  // LEGACY WITHDRAW (for L2 test contract compatibility)
+  // ============================================================================
+  //
+  // export struct WithdrawInfo {
+  //   depositId: Uint<64>;
+  // }
+  //
+  // export circuit legacyWithdraw(wi: WithdrawInfo, signerPk: CurvePoint): [] {
+  //   const receiver = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
+  //
+  //   // send coin to L1 receiver
+  //   assert(depositedCoins.member(wi.depositId), "Invalid depositId");
+  //   const coin = depositedCoins.lookup(wi.depositId);
+  //   sendShielded(coin, receiver, coin.value);
+  //
+  //   // update balance tracking
+  //   assert(balances.member(receiver.left), "No balance for receiver");
+  //   const oldBalance = balances.lookup(receiver.left);
+  //   assert(oldBalance >= coin.value, "Insufficient balance");
+  //   const newBalance = (oldBalance - coin.value) as Uint<128>;
+  //   if (newBalance == (0 as Uint<128>)) {
+  //     balances.remove(receiver.left);
+  //   } else {
+  //     balances.insert(receiver.left, newBalance);
+  //   }
+  // }
+}

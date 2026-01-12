@@ -1,0 +1,229 @@
+// Protocol Types for L1 ↔ L2 Cross-Domain Messaging (V1)
+//
+// This file defines the canonical message formats and hashing functions
+// that MUST be identical across all implementations (Compact, TypeScript, Solidity).
+//
+// CRITICAL DESIGN DECISIONS:
+// 1. All hashes are: sha256(concat(bytes32 chunks)) via persistentHash<Vector<n, Bytes<32>>>
+// 2. All integers are encoded as 32-byte LITTLE-ENDIAN (Field -> Bytes<32>)
+// 3. Domain separators are 32 bytes (padded with zeros)
+// 4. Empty merkle leaves are 0x00...00 (32 zero bytes)
+//
+// CONSENSUS CRITICAL: Any change to these types or hash functions is a breaking change.
+
+pragma language_version >= 0.16;
+
+module ProtocolTypes {
+
+  import CompactStandardLibrary;
+
+  // ============================================================================
+  // DOMAIN SEPARATORS (32 bytes each)
+  // ============================================================================
+  // Must match TypeScript/Solidity exactly.
+
+  // L1→L2 deposit message hash
+  export pure circuit dsL1ToL2Deposit(): Bytes<32> {
+    return pad(32, "mdn:l1l2:deposit");
+  }
+
+  // L2→L1 withdrawal message hash
+  export pure circuit dsL2ToL1Withdraw(): Bytes<32> {
+    return pad(32, "mdn:l2l1:wdraw");
+  }
+
+  // L1 message queue rolling hash
+  export pure circuit dsL1QueueRolling(): Bytes<32> {
+    return pad(32, "mdn:l1q:rolling");
+  }
+
+  // L2 withdrawal merkle leaf domain separation
+  export pure circuit dsL2WithdrawLeaf(): Bytes<32> {
+    return pad(32, "mdn:l2w:leaf");
+  }
+
+  // ============================================================================
+  // INTEGER ENCODING (Little-Endian, 32 bytes)
+  // ============================================================================
+  // Compact's Field -> Bytes<n> cast is little-endian.
+  // We encode all integers as Bytes<32> for uniform chunk alignment.
+
+  export pure circuit u64ToBytes32LE(x: Uint<64>): Bytes<32> {
+    return (x as Field) as Bytes<32>;
+  }
+
+  export pure circuit u128ToBytes32LE(x: Uint<128>): Bytes<32> {
+    return (x as Field) as Bytes<32>;
+  }
+
+  // ============================================================================
+  // MESSAGE TYPES
+  // ============================================================================
+
+  // L1 → L2 Deposit Message
+  // Created on L1 when user deposits via NIGHTGateway.
+  export struct L1ToL2DepositMessage {
+    sender: Bytes<32>;      // L1 sender address
+    recipient: Bytes<32>;   // L2 recipient address
+    amount: Uint<128>;      // Amount in smallest unit
+    nonce: Uint<64>;        // Queue index
+    gasLimit: Uint<64>;     // L2 gas limit
+    dataHash: Bytes<32>;    // Hash of calldata (zero for simple deposits)
+  }
+
+  // L2 → L1 Withdrawal Message
+  // Created on L2 when user calls withdrawNIGHT().
+  export struct L2ToL1WithdrawMessage {
+    sender: Bytes<32>;      // L2 sender address
+    recipient: Bytes<32>;   // L1 recipient address
+    amount: Uint<128>;      // Amount in smallest unit
+    nonce: Uint<64>;        // Message index
+  }
+
+  // ============================================================================
+  // HASH FUNCTIONS (sha256 over bytes32 chunks)
+  // ============================================================================
+  // Using persistentHash<Vector<n, Bytes<32>>>([...]) ensures:
+  // hash = sha256(chunk0 || chunk1 || chunk2 || ...)
+
+  // Hash L1→L2 deposit message
+  // Layout: DS || sender || recipient || amount_LE32 || nonce_LE32 || gasLimit_LE32 || dataHash
+  // = 7 chunks × 32 bytes = 224 bytes
+  export pure circuit hashL1ToL2Deposit(msg: L1ToL2DepositMessage): Bytes<32> {
+    return persistentHash<Vector<7, Bytes<32>>>([
+      dsL1ToL2Deposit(),
+      msg.sender,
+      msg.recipient,
+      u128ToBytes32LE(msg.amount),
+      u64ToBytes32LE(msg.nonce),
+      u64ToBytes32LE(msg.gasLimit),
+      msg.dataHash
+    ]);
+  }
+
+  // Hash L2→L1 withdrawal message
+  // Layout: DS || sender || recipient || amount_LE32 || nonce_LE32
+  // = 5 chunks × 32 bytes = 160 bytes
+  export pure circuit hashL2ToL1Withdraw(msg: L2ToL1WithdrawMessage): Bytes<32> {
+    return persistentHash<Vector<5, Bytes<32>>>([
+      dsL2ToL1Withdraw(),
+      msg.sender,
+      msg.recipient,
+      u128ToBytes32LE(msg.amount),
+      u64ToBytes32LE(msg.nonce)
+    ]);
+  }
+
+  // ============================================================================
+  // ROLLING HASH (L1 Message Queue)
+  // ============================================================================
+  // hash[0] = H(DS || 0x00...00 || txHash_0)
+  // hash[n] = H(DS || hash[n-1] || txHash_n)
+
+  export pure circuit hashRollingStep(prevHash: Bytes<32>, leafHash: Bytes<32>): Bytes<32> {
+    return persistentHash<Vector<3, Bytes<32>>>([
+      dsL1QueueRolling(),
+      prevHash,
+      leafHash
+    ]);
+  }
+
+  export pure circuit hashRollingInitial(firstLeafHash: Bytes<32>): Bytes<32> {
+    return hashRollingStep(pad(32, ""), firstLeafHash);
+  }
+
+  // ============================================================================
+  // WITHDRAWAL MERKLE LEAF
+  // ============================================================================
+  // Adds domain separation to prevent second-preimage attacks.
+
+  export pure circuit hashWithdrawLeaf(messageHash: Bytes<32>): Bytes<32> {
+    return persistentHash<Vector<2, Bytes<32>>>([
+      dsL2WithdrawLeaf(),
+      messageHash
+    ]);
+  }
+
+  // ============================================================================
+  // MERKLE NODE HASH
+  // ============================================================================
+  // Standard: H(left || right) - 64 bytes, no domain separation
+  // This matches Ethereum's merkle tree convention.
+
+  export pure circuit hashMerkleNode(left: Bytes<32>, right: Bytes<32>): Bytes<32> {
+    return persistentHash<Vector<2, Bytes<32>>>([left, right]);
+  }
+
+  // ============================================================================
+  // ZERO HASHES
+  // ============================================================================
+  // Pre-computed zero hashes for merkle tree construction.
+  // zeroHash[0] = H(0, 0)
+  // zeroHash[n] = H(zeroHash[n-1], zeroHash[n-1])
+
+  // Zero hash at level 0
+  export pure circuit zeroHashLevel0(): Bytes<32> {
+    return hashMerkleNode(pad(32, ""), pad(32, ""));
+  }
+
+  // Zero hash at level 1
+  export pure circuit zeroHashLevel1(): Bytes<32> {
+    const z0 = zeroHashLevel0();
+    return hashMerkleNode(z0, z0);
+  }
+
+  // Zero hash at level 2
+  export pure circuit zeroHashLevel2(): Bytes<32> {
+    const z1 = zeroHashLevel1();
+    return hashMerkleNode(z1, z1);
+  }
+
+  // Zero hash at level 3
+  export pure circuit zeroHashLevel3(): Bytes<32> {
+    const z2 = zeroHashLevel2();
+    return hashMerkleNode(z2, z2);
+  }
+
+  // Zero hash at level 4
+  export pure circuit zeroHashLevel4(): Bytes<32> {
+    const z3 = zeroHashLevel3();
+    return hashMerkleNode(z3, z3);
+  }
+
+  // ============================================================================
+  // BATCH PUBLIC DATA (Phase 7)
+  // ============================================================================
+  // This is what the oracle network signs to finalize a batch.
+  // The hash of this struct is the "batch commitment".
+
+  // Domain separator for batch public data hash
+  export pure circuit dsBatchPublicData(): Bytes<32> {
+    return pad(32, "mdn:batch:v1");
+  }
+
+  // Batch public data that oracles sign
+  export struct BatchPublicDataV1 {
+    batchIndex: Uint<64>;           // Monotonically increasing batch number
+    prevStateRoot: Bytes<32>;       // State root before this batch
+    postStateRoot: Bytes<32>;       // State root after this batch
+    withdrawRoot: Bytes<32>;        // Merkle root of withdrawals in this batch
+    l1MessageQueueHash: Bytes<32>;  // Rolling hash of processed L1→L2 messages
+    lastL1MessageIndex: Uint<64>;   // Last processed L1 message queue index
+  }
+
+  // Hash batch public data for oracle signing
+  // Layout: DS || batchIndex_LE32 || prevStateRoot || postStateRoot || 
+  //         withdrawRoot || l1MessageQueueHash || lastL1MessageIndex_LE32
+  // = 7 chunks × 32 bytes = 224 bytes
+  export pure circuit hashBatchPublicData(batch: BatchPublicDataV1): Bytes<32> {
+    return persistentHash<Vector<7, Bytes<32>>>([
+      dsBatchPublicData(),
+      u64ToBytes32LE(batch.batchIndex),
+      batch.prevStateRoot,
+      batch.postStateRoot,
+      batch.withdrawRoot,
+      batch.l1MessageQueueHash,
+      u64ToBytes32LE(batch.lastL1MessageIndex)
+    ]);
+  }
+}
