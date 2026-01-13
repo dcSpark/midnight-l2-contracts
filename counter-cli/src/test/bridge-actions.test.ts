@@ -1,5 +1,6 @@
 import path from 'path';
 import * as api from '../api';
+import { type BridgeL1ToL2DepositMessage } from '../api';
 import { type BridgeProviders, type DeployedBridgeContract } from '../common-types';
 import { currentDir } from '../config';
 import { createLogger } from '../logger';
@@ -23,6 +24,24 @@ if (network === 'undeployed') {
 const logger = await createLogger(logDir);
 
 const describeConfigured = network === 'undeployed' || contractAddress ? describe : describe.skip;
+
+const ZERO_BYTES_32 = new Uint8Array(32);
+
+const bytesEqual = (a: Uint8Array, b: Uint8Array): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
+};
+
+const isZeroBytes = (bytes: Uint8Array): boolean => bytes.every((value) => value === 0);
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const resolveDepositAmount = (balance: bigint, divisor: bigint): bigint => {
+  const candidate = balance / divisor;
+  return candidate > 0n ? candidate : 1n;
+};
 
 const getUnshieldedBalance = async (wallet: api.WalletContext): Promise<bigint> => {
   const state = await Rx.firstValueFrom(wallet.wallet.state().pipe(Rx.filter((s) => s.isSynced)));
@@ -80,6 +99,61 @@ const waitForLockedNIGHT = async (
   throw new Error(`Timed out waiting for locked NIGHT to reach ${expected}`);
 };
 
+const waitForFeeVault = async (
+  providers: BridgeProviders,
+  address: string,
+  expected: bigint,
+  attempts = 20,
+  delayMs = 3_000,
+): Promise<bigint> => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const state = await api.getBridgeQueryState(providers, address);
+    if (state && state.feeVault >= expected) {
+      return state.feeVault;
+    }
+    await sleep(delayMs);
+  }
+  throw new Error(`Timed out waiting for fee vault to reach ${expected}`);
+};
+
+const waitForMessageRollingHash = async (
+  providers: BridgeProviders,
+  address: string,
+  index: bigint,
+  attempts = 20,
+  delayMs = 3_000,
+): Promise<Uint8Array> => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const hash = await api.getMessageRollingHash(providers, address, index);
+    if (hash && !isZeroBytes(hash)) {
+      return hash;
+    }
+    await sleep(delayMs);
+  }
+  throw new Error(`Timed out waiting for rolling hash at index ${index}`);
+};
+
+const waitForL1ToL2Deposit = async (
+  providers: BridgeProviders,
+  address: string,
+  queueIndex: bigint,
+  attempts = 20,
+  delayMs = 3_000,
+): Promise<BridgeL1ToL2DepositMessage> => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const message = await api.getL1ToL2Deposit(providers, address, queueIndex);
+      if (message) {
+        return message;
+      }
+    } catch {
+      // Ignore transient errors while the indexer catches up.
+    }
+    await sleep(delayMs);
+  }
+  throw new Error(`Timed out waiting for deposit message at index ${queueIndex}`);
+};
+
 describeConfigured('Bridge actions', () => {
   let testEnvironment: TestEnvironment;
   let wallet: api.WalletContext;
@@ -120,8 +194,9 @@ describeConfigured('Bridge actions', () => {
     await logFundingState(wallet);
 
     const bridgeContract = deployedContract ?? (await api.joinContract(providers, contractAddress));
-    console.log('bridgeContract', bridgeContract.deployTxData.public.contractAddress);
-    const stateBefore = await api.getBridgeQueryState(providers, bridgeContract.deployTxData.public.contractAddress);
+    const bridgeAddress = bridgeContract.deployTxData.public.contractAddress;
+    console.log('bridgeContract', bridgeAddress);
+    const stateBefore = await api.getBridgeQueryState(providers, bridgeAddress);
     console.log('stateBefore', stateBefore);
     if (stateBefore === null) {
       throw new Error(`Bridge state not found for ${contractAddress}`);
@@ -140,6 +215,7 @@ describeConfigured('Bridge actions', () => {
     if (depositAmount <= 0n) {
       throw new Error('Deposit amount must be greater than zero');
     }
+    const queueIndex = stateBefore.nextCrossDomainMessageIndex;
     const coinPublicKey = providers.walletProvider.getCoinPublicKey();
     const l2Recipient = encodeCoinPublicKey(coinPublicKey);
     const gasLimit = 100_000n;
@@ -153,9 +229,123 @@ describeConfigured('Bridge actions', () => {
 
     const lockedAfter = await waitForLockedNIGHT(
       providers,
-      bridgeContract.deployTxData.public.contractAddress,
+      bridgeAddress,
       stateBefore.lockedNIGHT + depositAmount,
     );
     expect(lockedAfter).toBeGreaterThanOrEqual(stateBefore.lockedNIGHT + depositAmount);
+
+    const depositMessage = await waitForL1ToL2Deposit(providers, bridgeAddress, queueIndex);
+    expect(depositMessage.amount).toBe(depositAmount);
+    expect(depositMessage.nonce).toBe(queueIndex);
+    expect(depositMessage.gasLimit).toBe(gasLimit);
+    expect(bytesEqual(depositMessage.recipient, l2Recipient)).toBe(true);
+    expect(bytesEqual(depositMessage.sender, l2Recipient)).toBe(true);
+    expect(bytesEqual(depositMessage.dataHash, ZERO_BYTES_32)).toBe(true);
+
+    const rollingHash = await waitForMessageRollingHash(providers, bridgeAddress, queueIndex);
+    expect(rollingHash.length).toBe(32);
+
+    const storedTimestamp = await api.getMessageTimestamp(providers, bridgeAddress, queueIndex);
+    if (storedTimestamp === null) {
+      throw new Error('Failed to read message timestamp');
+    }
+    expect(storedTimestamp).toBe(timestamp);
+  });
+
+  it('should deposit unshielded NIGHT with fee and update fee vault [@slow]', async () => {
+    if (!contractAddress) {
+      throw new Error('TEST_BRIDGE_ADDRESS is required for preview tests');
+    }
+    if (!providers.walletProvider) {
+      throw new Error('Wallet provider is not available');
+    }
+
+    const bridgeContract = deployedContract ?? (await api.joinContract(providers, contractAddress));
+    const bridgeAddress = bridgeContract.deployTxData.public.contractAddress;
+    const stateBefore = await api.getBridgeQueryState(providers, bridgeAddress);
+    if (stateBefore === null) {
+      throw new Error(`Bridge state not found for ${contractAddress}`);
+    }
+
+    const balanceBefore = await getUnshieldedBalance(wallet);
+    const depositAmount = resolveDepositAmount(balanceBefore, 100n);
+    const feeAmount = 1n;
+    const queueIndex = stateBefore.nextCrossDomainMessageIndex;
+    const coinPublicKey = providers.walletProvider.getCoinPublicKey();
+    const l2Recipient = encodeCoinPublicKey(coinPublicKey);
+    const gasLimit = 100_000n;
+    const timestamp = 0n;
+
+    const txData = await bridgeContract.callTx.depositNIGHTUnshieldedWithFee(
+      depositAmount,
+      feeAmount,
+      l2Recipient,
+      gasLimit,
+      timestamp,
+    );
+    logger.info(`depositNIGHTUnshieldedWithFee txHash: ${txData.public.txHash}`);
+
+    const balanceAfter = await waitForUnshieldedBalance(
+      wallet,
+      (balance) => balance <= balanceBefore - depositAmount - feeAmount,
+    );
+    expect(balanceAfter <= balanceBefore - depositAmount - feeAmount).toBe(true);
+
+    const feeAfter = await waitForFeeVault(providers, bridgeAddress, stateBefore.feeVault + feeAmount);
+    expect(feeAfter).toBeGreaterThanOrEqual(stateBefore.feeVault + feeAmount);
+
+    const depositMessage = await waitForL1ToL2Deposit(providers, bridgeAddress, queueIndex);
+    expect(depositMessage.amount).toBe(depositAmount);
+    expect(depositMessage.nonce).toBe(queueIndex);
+    expect(depositMessage.gasLimit).toBe(gasLimit);
+    expect(bytesEqual(depositMessage.recipient, l2Recipient)).toBe(true);
+    expect(bytesEqual(depositMessage.sender, l2Recipient)).toBe(true);
+  });
+
+  it('should enqueue sequential deposits with increasing indices [@slow]', async () => {
+    if (!contractAddress) {
+      throw new Error('TEST_BRIDGE_ADDRESS is required for preview tests');
+    }
+    if (!providers.walletProvider) {
+      throw new Error('Wallet provider is not available');
+    }
+
+    const bridgeContract = deployedContract ?? (await api.joinContract(providers, contractAddress));
+    const bridgeAddress = bridgeContract.deployTxData.public.contractAddress;
+    const stateBefore = await api.getBridgeQueryState(providers, bridgeAddress);
+    if (stateBefore === null) {
+      throw new Error(`Bridge state not found for ${contractAddress}`);
+    }
+
+    const balanceBefore = await getUnshieldedBalance(wallet);
+    const firstAmount = resolveDepositAmount(balanceBefore, 80n);
+    const secondAmount = resolveDepositAmount(balanceBefore, 120n);
+    const firstIndex = stateBefore.nextCrossDomainMessageIndex;
+    const secondIndex = firstIndex + 1n;
+    const coinPublicKey = providers.walletProvider.getCoinPublicKey();
+    const l2Recipient = encodeCoinPublicKey(coinPublicKey);
+    const gasLimit = 75_000n;
+    const timestamp = 0n;
+
+    const firstTx = await bridgeContract.callTx.depositNIGHTUnshielded(firstAmount, l2Recipient, gasLimit, timestamp);
+    logger.info(`sequential deposit 1 txHash: ${firstTx.public.txHash}`);
+    const message1 = await waitForL1ToL2Deposit(providers, bridgeAddress, firstIndex);
+
+    const secondTx = await bridgeContract.callTx.depositNIGHTUnshielded(secondAmount, l2Recipient, gasLimit, timestamp);
+    logger.info(`sequential deposit 2 txHash: ${secondTx.public.txHash}`);
+    const message2 = await waitForL1ToL2Deposit(providers, bridgeAddress, secondIndex);
+
+    expect(message1.nonce).toBe(firstIndex);
+    expect(message2.nonce).toBe(secondIndex);
+
+    const rolling1 = await waitForMessageRollingHash(providers, bridgeAddress, firstIndex);
+    const rolling2 = await waitForMessageRollingHash(providers, bridgeAddress, secondIndex);
+    expect(bytesEqual(rolling1, rolling2)).toBe(false);
+
+    const stateAfter = await api.getBridgeQueryState(providers, bridgeAddress);
+    if (stateAfter === null) {
+      throw new Error(`Bridge state not found for ${contractAddress}`);
+    }
+    expect(stateAfter.nextCrossDomainMessageIndex).toBeGreaterThanOrEqual(firstIndex + 2n);
   });
 });

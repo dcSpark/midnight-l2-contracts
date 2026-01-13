@@ -293,6 +293,15 @@ export type BridgeQueryState = {
   readonly withdrawMessageCount: bigint;
 };
 
+export type BridgeL1ToL2DepositMessage = {
+  readonly sender: Uint8Array;
+  readonly recipient: Uint8Array;
+  readonly amount: bigint;
+  readonly nonce: bigint;
+  readonly gasLimit: bigint;
+  readonly dataHash: Uint8Array;
+};
+
 const getOwnerBytes = (providers: BridgeProviders): Uint8Array => {
   if (!providers.walletProvider) {
     throw new Error('Wallet provider is not available');
@@ -315,18 +324,23 @@ const getPrivateState = async (
   return defaultPrivateState;
 };
 
-export const getBridgeQueryState = async (
+const getBridgeCallOptions = async (
   providers: BridgeProviders,
   contractAddress: ContractAddress,
-): Promise<BridgeQueryState | null> => {
+): Promise<{
+  contract: BridgeContract;
+  contractAddress: ContractAddress;
+  coinPublicKey: ReturnType<WalletProvider['getCoinPublicKey']>;
+  initialContractState: ContractState;
+  initialZswapChainState: Awaited<ReturnType<typeof getPublicStates>>['zswapChainState'];
+  initialPrivateState: BridgePrivateState;
+} | null> => {
   assertIsContractAddress(contractAddress);
   if (!providers.publicDataProvider || !providers.walletProvider) {
     throw new Error('Providers are not available');
   }
-  logger.info('Checking bridge contract state...');
   const contractState = await providers.publicDataProvider.queryContractState(contractAddress);
   if (contractState == null) {
-    logger.info('Bridge state: unavailable');
     return null;
   }
   const publicStates = await getPublicStates(providers.publicDataProvider, contractAddress);
@@ -335,7 +349,7 @@ export const getBridgeQueryState = async (
     throw new Error('Wallet provider is not available');
   }
   const initialPrivateState = await getPrivateState(providers.privateStateProvider);
-  const baseOptions = {
+  return {
     contract: bridgeContractInstance,
     contractAddress,
     coinPublicKey,
@@ -343,6 +357,18 @@ export const getBridgeQueryState = async (
     initialZswapChainState: publicStates.zswapChainState,
     initialPrivateState,
   };
+};
+
+export const getBridgeQueryState = async (
+  providers: BridgeProviders,
+  contractAddress: ContractAddress,
+): Promise<BridgeQueryState | null> => {
+  logger.info('Checking bridge contract state...');
+  const baseOptions = await getBridgeCallOptions(providers, contractAddress);
+  if (!baseOptions) {
+    logger.info('Bridge state: unavailable');
+    return null;
+  }
 
   const nextCrossDomainMessageIndex = call({
     ...baseOptions,
@@ -377,6 +403,57 @@ export const getBridgeQueryState = async (
     withdrawRoot: withdrawRoot.private.result,
     withdrawMessageCount: withdrawMessageCount.private.result,
   };
+};
+
+export const getMessageRollingHash = async (
+  providers: BridgeProviders,
+  contractAddress: ContractAddress,
+  index: bigint,
+): Promise<Uint8Array | null> => {
+  const baseOptions = await getBridgeCallOptions(providers, contractAddress);
+  if (!baseOptions) {
+    return null;
+  }
+  const result = call({
+    ...baseOptions,
+    circuitId: 'getMessageRollingHash',
+    args: [index],
+  });
+  return result.private.result;
+};
+
+export const getMessageTimestamp = async (
+  providers: BridgeProviders,
+  contractAddress: ContractAddress,
+  index: bigint,
+): Promise<bigint | null> => {
+  const baseOptions = await getBridgeCallOptions(providers, contractAddress);
+  if (!baseOptions) {
+    return null;
+  }
+  const result = call({
+    ...baseOptions,
+    circuitId: 'getMessageTimestamp',
+    args: [index],
+  });
+  return result.private.result;
+};
+
+export const getL1ToL2Deposit = async (
+  providers: BridgeProviders,
+  contractAddress: ContractAddress,
+  queueIndex: bigint,
+): Promise<BridgeL1ToL2DepositMessage | null> => {
+  const baseOptions = await getBridgeCallOptions(providers, contractAddress);
+  if (!baseOptions) {
+    return null;
+  }
+  const result = call({
+    ...baseOptions,
+    circuitId: 'getL1ToL2Deposit',
+    args: [queueIndex],
+  });
+  return result.private.result;
 };
 
 export const bridgeContractInstance: BridgeContract = new Bridge.Contract(witnesses);
