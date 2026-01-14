@@ -23,8 +23,8 @@ const deploy = async () => {
     const address = deployed.deployTxData.public.contractAddress;
 
     logger.info(`Bridge deployed at: ${address}`);
-    console.log(`BRIDGE_ADDRESS=${address}`);
-    console.log(`VITE_CONTRACT_ADDRESS="${address}"`);
+    process.stdout.write(`BRIDGE_ADDRESS=${address}\n`);
+    process.stdout.write(`VITE_CONTRACT_ADDRESS="${address}"\n`);
   } finally {
     if (walletContext) {
       await api.closeWallet(walletContext);
@@ -33,6 +33,7 @@ const deploy = async () => {
 };
 
 deploy().catch((error) => {
-  console.error("Deploy failed:", error);
+  const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
+  process.stderr.write(`Deploy failed: ${message}\n`);
   process.exitCode = 1;
 });

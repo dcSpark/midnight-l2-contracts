@@ -94,7 +94,7 @@ const buildWallet = async (config: Config, rli: Interface): Promise<WalletContex
   }
   // Check if mnemonic is available in environment
   const envMnemonic = process.env.MY_PREVIEW_MNEMONIC;
-  console.log('building wallet from mnemonic...', envMnemonic);
+  logger.info({ msg: 'Building wallet from mnemonic', hasMnemonic: Boolean(envMnemonic) });
 
   while (true) {
     const choice = await rli.question(WALLET_LOOP_QUESTION);

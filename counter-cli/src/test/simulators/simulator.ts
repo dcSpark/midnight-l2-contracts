@@ -1,7 +1,5 @@
-import * as ledger from '@midnight-ntwrk/ledger-v6';
 import path from 'path';
 import type { Logger } from 'pino';
-import * as Rx from 'rxjs';
 import {
   DockerComposeEnvironment,
   GenericContainer,
@@ -185,12 +183,10 @@ export class TestEnvironment {
     if (this.testConfig.dappConfig.networkId === 'undeployed') {
       this.walletContext = await api.buildWalletFromHexSeed(this.testConfig.dappConfig, this.testConfig.seed);
     } else {
-      console.log('this.testConfig.mnemonic', this.testConfig.mnemonic);
+      this.logger.debug('Using preview mnemonic for wallet setup');
       this.walletContext = await api.buildWalletAndWaitForFunds(this.testConfig.dappConfig, this.testConfig.mnemonic);
     }
 
-    const state = await Rx.firstValueFrom(this.walletContext.wallet.state());
-    const balance = state.unshielded?.balances[ledger.nativeToken().raw] ?? 0n;
     return this.walletContext;
   };
 }

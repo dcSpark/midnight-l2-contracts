@@ -33,6 +33,7 @@ export default [
         process: 'readonly',
         Buffer: 'readonly',
         URL: 'readonly',
+        console: 'readonly',
         setTimeout: 'readonly',
       },
     },
@@ -53,6 +54,8 @@ export default [
       '@typescript-eslint/no-unsafe-assignment': 'warn',
       '@typescript-eslint/no-unsafe-member-access': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
 ];
