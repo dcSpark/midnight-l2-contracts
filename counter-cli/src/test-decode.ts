@@ -6,7 +6,7 @@ import { Bridge, type BridgePrivateState, witnesses } from 'counter-contract/bro
 import { Console } from 'node:console';
 import { stderr, stdout } from 'node:process';
 import { WebSocket } from 'ws';
-import { PreviewConfig } from './config';
+import { type Config, PreviewConfig, UndeployedConfig } from './config';
 
 const console = new Console({ stdout, stderr });
 globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -23,17 +23,46 @@ type L1ToL2DepositMessage = {
 const DEFAULT_CONTRACT_ADDRESS =
   process.env.DEFAULT_BRIDGE_ADDRESS ?? 'fa8533250190a9d2b39686523e7b13e7dc30647a341f8163dceaec2cdc365f12';
 const DEPOSIT_KEYS = parseKeys(process.env.DEPOSIT_KEYS);
-const previewConfig = new PreviewConfig();
-const INDEXER_HTTP = process.env.INDEXER_HTTP ?? previewConfig.indexer;
-const INDEXER_WS = process.env.INDEXER_WS ?? previewConfig.indexerWS;
+const { config: baseConfig, label: configLabel } = resolveNetworkConfig();
+const INDEXER_HTTP = process.env.INDEXER_HTTP ?? baseConfig.indexer;
+const INDEXER_WS = process.env.INDEXER_WS ?? baseConfig.indexerWS;
 const provider = indexerPublicDataProvider(INDEXER_HTTP, INDEXER_WS);
 const ZERO_COIN_PUBLIC_KEY = '0'.repeat(64);
 const defaultPrivateState: BridgePrivateState = { privateState: 0 };
+
+type NetworkPreference = 'preview' | 'undeployed';
+
+function resolveNetworkConfig(): { config: Config; label: string } {
+  const envPreference = (process.env.MIDNIGHT_NETWORK ?? process.env.MIDNIGHT_ENV ?? '').trim().toLowerCase();
+  if (envPreference.length === 0) {
+    return { config: new PreviewConfig(), label: 'preview (default)' };
+  }
+
+  const map: Record<string, NetworkPreference> = {
+    preview: 'preview',
+    undeployed: 'undeployed',
+    local: 'undeployed',
+    standalone: 'undeployed',
+    dev: 'undeployed',
+  };
+
+  const preference = map[envPreference];
+  if (preference === 'undeployed') {
+    return { config: new UndeployedConfig(), label: 'undeployed/local' };
+  }
+  if (preference === 'preview') {
+    return { config: new PreviewConfig(), label: 'preview' };
+  }
+
+  console.warn(`Unknown MIDNIGHT_NETWORK value "${envPreference}". Falling back to preview settings.`);
+  return { config: new PreviewConfig(), label: 'preview (fallback)' };
+}
 
 async function main() {
   const contractAddress = process.env.BRIDGE_CONTRACT_ADDRESS ?? DEFAULT_CONTRACT_ADDRESS;
   assertIsContractAddress(contractAddress);
   console.log('Querying Bridge contract at address:', contractAddress);
+  console.log('Network preset:', configLabel);
   console.log('Indexer (HTTP/WS):', INDEXER_HTTP, INDEXER_WS);
 
   const contractState = await provider.queryContractState(contractAddress);
