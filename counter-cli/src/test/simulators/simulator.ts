@@ -1,4 +1,7 @@
-import { type Config, UndeployedConfig, currentDir, PreviewConfig } from '../../config';
+import * as ledger from '@midnight-ntwrk/ledger-v6';
+import path from 'path';
+import type { Logger } from 'pino';
+import * as Rx from 'rxjs';
 import {
   DockerComposeEnvironment,
   GenericContainer,
@@ -6,12 +9,9 @@ import {
   type StartedTestContainer,
   Wait,
 } from 'testcontainers';
-import path from 'path';
-import * as api from '../../api';
 import type { WalletContext } from '../../api';
-import * as Rx from 'rxjs';
-import * as ledger from '@midnight-ntwrk/ledger-v6';
-import type { Logger } from 'pino';
+import * as api from '../../api';
+import { type Config, currentDir, PreviewConfig, UndeployedConfig } from '../../config';
 
 const GENESIS_MINT_WALLET_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 
@@ -46,14 +46,12 @@ export function parseArgs(required: string[]): TestConfiguration {
     }
   }
 
-  let seed = '';
+  let seed = GENESIS_MINT_WALLET_SEED;
   let mnemonic = TEST_MNEMONIC;
-  if (required.includes('seed')) {
-    if (process.env.TEST_WALLET_SEED !== undefined) {
-      seed = process.env.TEST_WALLET_SEED;
-    } else {
-      throw new Error('TEST_WALLET_SEED environment variable is not defined.');
-    }
+  if (process.env.TEST_WALLET_SEED !== undefined) {
+    seed = process.env.TEST_WALLET_SEED;
+  } else if (required.includes('seed')) {
+    throw new Error('TEST_WALLET_SEED environment variable is not defined.');
   }
 
   if (process.env.MY_PREVIEW_MNEMONIC !== undefined) {
@@ -74,6 +72,11 @@ export function parseArgs(required: string[]): TestConfiguration {
       case 'preview':
         cfg = new PreviewConfig();
         psMode = 'preview';
+        cacheFileName = `${seed.substring(0, 7)}-${psMode}.state`;
+        break;
+      case 'undeployed':
+        cfg = new UndeployedConfig();
+        psMode = 'undeployed';
         cacheFileName = `${seed.substring(0, 7)}-${psMode}.state`;
         break;
       default:
