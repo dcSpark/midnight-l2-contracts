@@ -51,10 +51,20 @@ async function main() {
 
   const deposits = new Map<bigint, L1ToL2DepositMessage>();
 
+  const lastFinalizedCall = contract.circuits.lastFinalizedBatchIndex(circuitContext);
+  circuitContext = lastFinalizedCall.context as typeof circuitContext;
+  const lastFinalizedBatchIndex = lastFinalizedCall.result;
+
+  const lastCommittedCall = contract.circuits.lastCommittedBatchIndex(circuitContext);
+  circuitContext = lastCommittedCall.context as typeof circuitContext;
+  const lastCommittedBatchIndex = lastCommittedCall.result;
+
   const nextIndexCall = contract.circuits.getNextCrossDomainMessageIndex(circuitContext);
   circuitContext = nextIndexCall.context as typeof circuitContext;
   const nextIndex = nextIndexCall.result;
   console.log('Next cross-domain message index:', nextIndex.toString());
+  console.log('Last committed batch index:', lastCommittedBatchIndex.toString());
+  console.log('Last finalized batch index:', lastFinalizedBatchIndex.toString());
 
   const fetchAndCache = (queueIndex: bigint): L1ToL2DepositMessage | undefined => {
     if (deposits.has(queueIndex)) {
