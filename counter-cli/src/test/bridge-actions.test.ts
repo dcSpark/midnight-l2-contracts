@@ -50,7 +50,7 @@ const getUnshieldedBalance = async (wallet: api.WalletContext): Promise<bigint> 
 
 const waitForUnshieldedBalance = async (
   wallet: api.WalletContext,
-  predicate: (balance: bigint) => boolean,
+  predicate: (_balance: bigint) => boolean,
   timeoutMs = 120_000,
 ): Promise<bigint> =>
   await Rx.firstValueFrom(
@@ -195,9 +195,9 @@ describeConfigured('Bridge actions', () => {
 
     const bridgeContract = deployedContract ?? (await api.joinContract(providers, contractAddress));
     const bridgeAddress = bridgeContract.deployTxData.public.contractAddress;
-    console.log('bridgeContract', bridgeAddress);
+    logger.info({ section: 'BridgeContract', bridgeAddress });
     const stateBefore = await api.getBridgeQueryState(providers, bridgeAddress);
-    console.log('stateBefore', stateBefore);
+    logger.info({ section: 'BridgeStateBefore', state: stateBefore });
     if (stateBefore === null) {
       throw new Error(`Bridge state not found for ${contractAddress}`);
     }

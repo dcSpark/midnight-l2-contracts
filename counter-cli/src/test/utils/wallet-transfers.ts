@@ -2,7 +2,7 @@ import { CombinedTokenTransfer } from '@midnight-ntwrk/wallet-sdk-facade';
 import * as api from '../../api';
 import * as ledger from '@midnight-ntwrk/ledger-v6';
 import { tokenValue } from './utils';
-import { MidnightBech32m, ShieldedAddress, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
+import { MidnightBech32m, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 
 //allows to transfer unshielded tokens
 //TODO: correct error with address

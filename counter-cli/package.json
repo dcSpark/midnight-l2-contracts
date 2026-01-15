@@ -18,9 +18,10 @@
   "scripts": {
     "test-undeployed": "vitest --no-file-parallelism run",
     "test-preview": "RUN_ENV_TESTS=true TEST_ENV=preview vitest run",
-    "tui-undeployed": "node --experimental-specifier-resolution=node --loader ts-node/esm src/tui_standalone.ts",
-    "tui-preview": "node --experimental-specifier-resolution=node --loader ts-node/esm src/tui_preview.ts",
-    "setup-undeployed": "node --experimental-specifier-resolution=node --loader ts-node/esm src/setup/standalone.ts",
+    "tui-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/tui_standalone.ts",
+    "tui-preview": "npx --yes tsx --tsconfig tsconfig.json src/tui_preview.ts",
+    "setup-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/setup/standalone.ts",
+    "deploy-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/deploy-undeployed.ts",
     "ps-undeployed": "docker compose -f ps-undeployed.yml up",
     "ps-preview": "docker compose -f ps-preview.yml up",
     "build": "rm -rf dist && tsc --project tsconfig.build.json",
