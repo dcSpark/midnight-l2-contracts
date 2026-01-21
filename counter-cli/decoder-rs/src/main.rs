@@ -75,6 +75,22 @@ async fn main() -> Result<()> {
         "Next cross-domain message index: {}",
         ledger.rollup.next_cross_domain_message_index
     );
+    match ledger.rollup.next_cross_domain_message_index.checked_sub(1) {
+        Some(latest_idx) => match ledger.rollup.message_rolling_hashes.get(&latest_idx) {
+            Some(hash) => println!(
+                "Rolling hash at index {}: {}",
+                latest_idx,
+                hex::encode(hash)
+            ),
+            None => println!(
+                "Rolling hash at index {} is unavailable in the ledger snapshot",
+                latest_idx
+            ),
+        },
+        None => println!(
+            "Rolling hash unavailable: next index is 0, so no messages have been recorded yet."
+        ),
+    }
 
     let deposits = &ledger.rollup.l1_to_l2_deposits;
     if deposits.is_empty() {

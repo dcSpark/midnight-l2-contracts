@@ -91,7 +91,18 @@ async function main() {
   const nextIndexCall = contract.circuits.getNextCrossDomainMessageIndex(circuitContext);
   circuitContext = nextIndexCall.context as typeof circuitContext;
   const nextIndex = nextIndexCall.result;
+  let rollingHashAtNextIndex: Uint8Array | undefined;
+  try {
+    const rollingHashCall = contract.circuits.getMessageRollingHash(circuitContext, nextIndex - 1n);
+    circuitContext = rollingHashCall.context as typeof circuitContext;
+    rollingHashAtNextIndex = rollingHashCall.result;
+  } catch (error) {
+    console.warn('Unable to fetch message rolling hash at index', nextIndex.toString(), ':', error);
+  }
   console.log('Next cross-domain message index:', nextIndex.toString());
+  if (rollingHashAtNextIndex) {
+    console.log('Rolling hash at latest index:', toHex(rollingHashAtNextIndex));
+  }
   console.log('Last committed batch index:', lastCommittedBatchIndex.toString());
   console.log('Last finalized batch index:', lastFinalizedBatchIndex.toString());
 
