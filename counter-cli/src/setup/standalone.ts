@@ -1,9 +1,9 @@
+import 'dotenv/config';
 import path from 'path';
 import * as api from '../api';
 import { currentDir } from '../config';
 import { createLogger } from '../logger';
 import { TestEnvironment } from '../test/simulators/simulator';
-import 'dotenv/config';
 import { sendArbitraryUnshieldedToken } from '../test/utils/wallet-transfers';
 
 const logDir = path.resolve(currentDir, '..', 'logs', 'setup-undeployed', `${new Date().toISOString()}.log`);

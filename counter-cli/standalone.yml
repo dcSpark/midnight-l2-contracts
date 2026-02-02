@@ -7,6 +7,8 @@ services:
       - '6300:6300'
     environment:
       RUST_BACKTRACE: 'full'
+    volumes:
+      - './.cache/midnight/zk-params:/.cache/midnight/zk-params'
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:6300/version']
       interval: 10s
@@ -40,6 +42,11 @@ services:
     container_name: 'counter-node'
     ports:
       - '9944:9944'
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '5'
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:9944/health']
       interval: 2s
@@ -48,3 +55,6 @@ services:
       start_period: 40s
     environment:
       CFG_PRESET: 'dev'
+      APPEND_ARGS: '--rpc-methods=Unsafe'
+      RUST_BACKTRACE: '1'
+      RUST_LOG: 'runtime=debug,wasm=debug,substrate=debug,sc_rpc=debug,info'
