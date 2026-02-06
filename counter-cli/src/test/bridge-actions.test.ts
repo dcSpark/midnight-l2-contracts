@@ -1,15 +1,20 @@
+import { ContractState, createCircuitContext, encodeCoinPublicKey } from '@midnight-ntwrk/compact-runtime';
+import * as ledger from '@midnight-ntwrk/ledger-v7';
+import { encodeUserAddress, sampleUserAddress } from '@midnight-ntwrk/onchain-runtime-v2';
+import { Buffer } from 'buffer';
+import { computeMerkleRoot, computeWithdrawLeaf, generateMerkleProof, hashL2ToL1Withdraw } from 'counter-contract';
+import { Bridge, type BridgePrivateState, witnesses } from 'counter-contract/browser';
+import { createHash, randomBytes } from 'crypto';
+import 'dotenv/config';
 import path from 'path';
+import * as Rx from 'rxjs';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as api from '../api';
 import { type BridgeL1ToL2DepositMessage } from '../api';
 import { type BridgeProviders, type DeployedBridgeContract } from '../common-types';
 import { currentDir } from '../config';
 import { createLogger } from '../logger';
 import { TestEnvironment } from './simulators/simulator';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import * as Rx from 'rxjs';
-import * as ledger from '@midnight-ntwrk/ledger-v6';
-import { encodeCoinPublicKey } from '@midnight-ntwrk/compact-runtime';
-import 'dotenv/config';
 
 let contractAddress = process.env.TEST_BRIDGE_ADDRESS;
 const depositAmountEnv = process.env.TEST_DEPOSIT_AMOUNT_UNSHIELDED;
@@ -26,6 +31,25 @@ const logger = await createLogger(logDir);
 const describeConfigured = network === 'undeployed' || contractAddress ? describe : describe.skip;
 
 const ZERO_BYTES_32 = new Uint8Array(32);
+const ZERO_COIN_PUBLIC_KEY = '0'.repeat(64);
+const defaultPrivateState: BridgePrivateState = { privateState: 0 };
+const bridgeCircuitContract = new Bridge.Contract<BridgePrivateState>(witnesses);
+const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n] as const;
+const DEFAULT_SIGNER_BITMAP = (1n << BigInt(DEFAULT_VERIFIER_SECRET_KEYS.length)) - 1n;
+const SIGNATURE_NONCE = 0n;
+const SIGNATURE_MAX_NONCE = 256n;
+const JUBJUB_SCALAR_FIELD = 6554484396890773809930967563523245729705921265872317281365359162392183254199n;
+const WITHDRAW_TREE_DEPTH = 16;
+type PublicDataProvider = NonNullable<BridgeProviders['publicDataProvider']>;
+type RollupSnapshot = {
+  contractState: ContractState;
+  lastCommittedBatchIndex: bigint;
+  lastFinalizedBatchIndex: bigint;
+  nextCrossDomainMessageIndex: bigint;
+  nextUnfinalizedQueueIndex: bigint;
+};
+type Signature = Bridge.Signature;
+type L1_BatchPublicDataV1Full = Bridge.L1_BatchPublicDataV1Full;
 
 const bytesEqual = (a: Uint8Array, b: Uint8Array): boolean => {
   if (a.length !== b.length) {
@@ -227,11 +251,7 @@ describeConfigured('Bridge actions', () => {
     const balanceAfter = await waitForUnshieldedBalance(wallet, (balance) => balance <= balanceBefore - depositAmount);
     expect(balanceAfter <= balanceBefore - depositAmount).toBe(true);
 
-    const lockedAfter = await waitForLockedNIGHT(
-      providers,
-      bridgeAddress,
-      stateBefore.lockedNIGHT + depositAmount,
-    );
+    const lockedAfter = await waitForLockedNIGHT(providers, bridgeAddress, stateBefore.lockedNIGHT + depositAmount);
     expect(lockedAfter).toBeGreaterThanOrEqual(stateBefore.lockedNIGHT + depositAmount);
 
     const depositMessage = await waitForL1ToL2Deposit(providers, bridgeAddress, queueIndex);
@@ -268,8 +288,19 @@ describeConfigured('Bridge actions', () => {
     }
 
     const balanceBefore = await getUnshieldedBalance(wallet);
-    const depositAmount = resolveDepositAmount(balanceBefore, 100n);
+    //const depositAmount = resolveDepositAmount(balanceBefore, 100n);
     const feeAmount = 1n;
+    const spendableAfterFee = balanceBefore > feeAmount ? balanceBefore - feeAmount : 0n;
+    if (spendableAfterFee <= 0n) {
+      throw new Error('Not enough unshielded NIGHT to pay the bridge fee');
+    }
+    let depositAmount = resolveDepositAmount(spendableAfterFee, 100n);
+    if (depositAmount > spendableAfterFee) {
+      depositAmount = spendableAfterFee;
+    }
+    if (depositAmount <= 0n) {
+      throw new Error('Deposit amount must be greater than zero after accounting for the fee');
+    }
     const queueIndex = stateBefore.nextCrossDomainMessageIndex;
     const coinPublicKey = providers.walletProvider.getCoinPublicKey();
     const l2Recipient = encodeCoinPublicKey(coinPublicKey);
@@ -348,4 +379,448 @@ describeConfigured('Bridge actions', () => {
     }
     expect(stateAfter.nextCrossDomainMessageIndex).toBeGreaterThanOrEqual(firstIndex + 2n);
   });
+
+  it('should relay and claim an unshielded withdrawal [@slow]', async () => {
+    if (!contractAddress) {
+      throw new Error('TEST_BRIDGE_ADDRESS is required for preview tests');
+    }
+    if (!providers.walletProvider) {
+      throw new Error('Wallet provider is not available');
+    }
+    if (!providers.publicDataProvider) {
+      throw new Error('Public data provider is not available');
+    }
+
+    const bridgeContract = deployedContract ?? (await api.joinContract(providers, contractAddress));
+    const bridgeAddress = bridgeContract.deployTxData.public.contractAddress;
+    await ensureDefaultVerifierSet(bridgeContract);
+
+    const bridgeState = await api.getBridgeQueryState(providers, bridgeAddress);
+    if (bridgeState === null) {
+      throw new Error(`Bridge state not found for ${contractAddress}`);
+    }
+    const balanceBefore = await getUnshieldedBalance(wallet);
+    let depositAmount: bigint;
+    if (depositAmountEnv) {
+      depositAmount = BigInt(depositAmountEnv);
+    } else {
+      depositAmount = resolveDepositAmount(balanceBefore, 30n);
+    }
+    if (depositAmount < 4n) {
+      depositAmount = 4n;
+    }
+    const withdrawAmount = depositAmount / 2n;
+    if (withdrawAmount === 0n) {
+      throw new Error('Withdraw amount must be greater than zero');
+    }
+    const claimAmount = withdrawAmount > 1n ? withdrawAmount - 1n : withdrawAmount;
+    const expectedRemainder = withdrawAmount - claimAmount;
+
+    const coinPublicKey = providers.walletProvider.getCoinPublicKey();
+    if (!coinPublicKey) {
+      throw new Error('Wallet provider coin key is not available');
+    }
+    const l2Recipient = encodeCoinPublicKey(coinPublicKey);
+    const gasLimit = 120_000n;
+    const timestamp = 0n;
+
+    const depositTx = await bridgeContract.callTx.depositNIGHTUnshielded(
+      depositAmount,
+      l2Recipient,
+      gasLimit,
+      timestamp,
+    );
+    logger.info(`withdrawal test deposit txHash: ${depositTx.public.txHash}`);
+
+    await waitForUnshieldedBalance(wallet, (balance) => balance <= balanceBefore - depositAmount);
+    await waitForLockedNIGHT(providers, bridgeAddress, bridgeState.lockedNIGHT + depositAmount);
+
+    const withdrawNonce = bridgeState.withdrawMessageCount;
+    if (withdrawNonce >= 1n << BigInt(WITHDRAW_TREE_DEPTH)) {
+      throw new Error('Withdraw nonce exceeds merkle tree depth capacity');
+    }
+    const recipientAddress = encodeUserAddress(sampleUserAddress());
+    const withdrawMessageHash = hashL2ToL1Withdraw({
+      sender: ZERO_BYTES_32,
+      recipient: recipientAddress,
+      amount: withdrawAmount,
+      nonce: withdrawNonce,
+    });
+    const withdrawLeaf = computeWithdrawLeaf(withdrawMessageHash);
+    const leafIndex = Number(withdrawNonce);
+    const leaves = buildWithdrawLeaves(leafIndex, withdrawLeaf);
+    const withdrawRoot = computeMerkleRoot(leaves, WITHDRAW_TREE_DEPTH);
+    const proof = generateMerkleProof(leaves, leafIndex, WITHDRAW_TREE_DEPTH);
+    const indexBits = computeIndexBits(BigInt(leafIndex), WITHDRAW_TREE_DEPTH);
+
+    const batchInputs = await ensurePendingBatch({
+      bridgeContract,
+      contract: bridgeCircuitContract,
+      contractAddress: bridgeAddress,
+      publicDataProvider: providers.publicDataProvider,
+    });
+
+    const batchData = await buildBatchPublicData({
+      contract: bridgeCircuitContract,
+      contractAddress: bridgeAddress,
+      contractState: batchInputs.snapshot.contractState,
+      snapshot: batchInputs.snapshot,
+      batchHash: batchInputs.batchHash,
+      withdrawRoot,
+    });
+
+    const digest = hashBatchPublicDataV1Full(batchData);
+    const signatures = buildSignatureVector(digest);
+    const finalizeTx = await bridgeContract.callTx.finalizeBatch(batchData, signatures, DEFAULT_SIGNER_BITMAP, 0n);
+    logger.info(`finalizeBatch txHash: ${finalizeTx.public.txHash}`);
+
+    const targetBatchIndex = batchInputs.snapshot.lastFinalizedBatchIndex + 1n;
+    await waitForBatchIndexUpdate(
+      providers.publicDataProvider,
+      bridgeCircuitContract,
+      bridgeAddress,
+      (snapshot) => snapshot.lastFinalizedBatchIndex >= targetBatchIndex,
+      'lastFinalizedBatchIndex',
+    );
+
+    const relayTx = await bridgeContract.callTx.relayWithdrawNIGHTWithProof(
+      ZERO_BYTES_32,
+      recipientAddress,
+      withdrawAmount,
+      {
+        batchIndex: batchData.batchIndex,
+        nonce: withdrawNonce,
+        indexBits,
+        siblings: proof.proof,
+      },
+    );
+    logger.info(`relayWithdrawNIGHTWithProof txHash: ${relayTx.public.txHash}`);
+
+    const pendingAfterRelay = await waitForPendingWithdrawal(
+      providers.publicDataProvider,
+      bridgeCircuitContract,
+      bridgeAddress,
+      recipientAddress,
+      (value) => value >= withdrawAmount,
+      'pending withdrawal after relay',
+    );
+    expect(pendingAfterRelay).toBeGreaterThanOrEqual(withdrawAmount);
+
+    const balanceBeforeClaim = await getUnshieldedBalance(wallet);
+    const claimTx = await bridgeContract.callTx.claimL1WithdrawalUnshielded(recipientAddress, claimAmount);
+    logger.info(`claimL1WithdrawalUnshielded txHash: ${claimTx.public.txHash}`);
+    await waitForUnshieldedBalance(wallet, (balance) => balance >= balanceBeforeClaim + claimAmount);
+
+    const pendingAfterClaim = await waitForPendingWithdrawal(
+      providers.publicDataProvider,
+      bridgeCircuitContract,
+      bridgeAddress,
+      recipientAddress,
+      (value) => value === expectedRemainder,
+      'pending withdrawal after claim',
+    );
+    expect(pendingAfterClaim).toBe(expectedRemainder);
+  });
 });
+
+type EnsureBatchParams = {
+  bridgeContract: DeployedBridgeContract;
+  contract: Bridge.Contract<BridgePrivateState>;
+  contractAddress: string;
+  publicDataProvider: PublicDataProvider;
+};
+
+type EnsureBatchResult = {
+  snapshot: RollupSnapshot;
+  batchHash: Uint8Array;
+};
+
+const deriveDefaultVerifierSet = () => DEFAULT_VERIFIER_SECRET_KEYS.map((sk) => Bridge.pureCircuits.derivePk(sk));
+
+const ensureDefaultVerifierSet = async (bridgeContract: DeployedBridgeContract): Promise<void> => {
+  await bridgeContract.callTx.setVerifierSet(deriveDefaultVerifierSet());
+};
+
+const ensurePendingBatch = async (params: EnsureBatchParams): Promise<EnsureBatchResult> => {
+  const initialSnapshot = await fetchSnapshot(params.publicDataProvider, params.contract, params.contractAddress);
+  const targetBatchIndex = initialSnapshot.lastFinalizedBatchIndex + 1n;
+  if (initialSnapshot.lastCommittedBatchIndex >= targetBatchIndex) {
+    const existingHash = await readCommittedBatch(
+      params.contract,
+      params.contractAddress,
+      initialSnapshot.contractState,
+      targetBatchIndex,
+    );
+    return { snapshot: initialSnapshot, batchHash: existingHash };
+  }
+
+  const parentHash = await readCommittedBatch(
+    params.contract,
+    params.contractAddress,
+    initialSnapshot.contractState,
+    initialSnapshot.lastCommittedBatchIndex,
+  );
+  const batchHash = randomBytes32();
+  const tx = await params.bridgeContract.callTx.commitBatch(parentHash, batchHash);
+  logger.info(`commitBatch txHash: ${tx.public.txHash}`);
+
+  const updatedSnapshot = await waitForBatchIndexUpdate(
+    params.publicDataProvider,
+    params.contract,
+    params.contractAddress,
+    (snapshot) => snapshot.lastCommittedBatchIndex >= targetBatchIndex,
+    'lastCommittedBatchIndex',
+  );
+  logger.info(`ZZZZ ${updatedSnapshot.lastCommittedBatchIndex}`);
+  return { snapshot: updatedSnapshot, batchHash };
+};
+
+const fetchSnapshot = async (
+  publicDataProvider: PublicDataProvider,
+  contract: Bridge.Contract<BridgePrivateState>,
+  contractAddress: string,
+): Promise<RollupSnapshot> => {
+  const contractState = await publicDataProvider.queryContractState(contractAddress);
+  if (!contractState) {
+    throw new Error('No contract state available');
+  }
+  let context = createCircuitContext(contractAddress, ZERO_COIN_PUBLIC_KEY, contractState, defaultPrivateState);
+  const lastCommittedCall = contract.circuits.lastCommittedBatchIndex(context);
+  context = lastCommittedCall.context as typeof context;
+  const lastCommittedBatchIndex = lastCommittedCall.result;
+  const lastFinalizedCall = contract.circuits.lastFinalizedBatchIndex(context);
+  context = lastFinalizedCall.context as typeof context;
+  const lastFinalizedBatchIndex = lastFinalizedCall.result;
+  const nextIndexCall = contract.circuits.getNextCrossDomainMessageIndex(context);
+  context = nextIndexCall.context as typeof context;
+  const nextCrossDomainMessageIndex = nextIndexCall.result;
+  const nextUnfinalizedCall = contract.circuits.getNextUnfinalizedQueueIndex(context);
+  return {
+    contractState,
+    lastCommittedBatchIndex,
+    lastFinalizedBatchIndex,
+    nextCrossDomainMessageIndex,
+    nextUnfinalizedQueueIndex: nextUnfinalizedCall.result,
+  };
+};
+
+const waitForBatchIndexUpdate = async (
+  publicDataProvider: PublicDataProvider,
+  contract: Bridge.Contract<BridgePrivateState>,
+  contractAddress: string,
+  predicate: (snapshot: RollupSnapshot) => boolean,
+  label: string,
+  attempts = 20,
+  delayMs = 3_000,
+): Promise<RollupSnapshot> => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const snapshot = await fetchSnapshot(publicDataProvider, contract, contractAddress);
+    if (predicate(snapshot)) {
+      return snapshot;
+    }
+    await sleep(delayMs);
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+};
+
+const readCommittedBatch = async (
+  contract: Bridge.Contract<BridgePrivateState>,
+  contractAddress: string,
+  contractState: ContractState,
+  index: bigint,
+): Promise<Uint8Array> => {
+  const context = createCircuitContext(contractAddress, ZERO_COIN_PUBLIC_KEY, contractState, defaultPrivateState);
+  return contract.circuits.getCommittedBatch(context, index).result;
+};
+
+const computeLastProcessedQueueIndex = (snapshot: RollupSnapshot): bigint => {
+  if (snapshot.nextCrossDomainMessageIndex === 0n) {
+    return 0n;
+  }
+  const candidate = snapshot.nextCrossDomainMessageIndex - 1n;
+  if (snapshot.nextUnfinalizedQueueIndex === 0n) {
+    return candidate;
+  }
+  const minimum = snapshot.nextUnfinalizedQueueIndex - 1n;
+  return candidate > minimum ? candidate : minimum;
+};
+
+type BatchDataParams = {
+  contract: Bridge.Contract<BridgePrivateState>;
+  contractAddress: string;
+  contractState: ContractState;
+  snapshot: RollupSnapshot;
+  batchHash: Uint8Array;
+  withdrawRoot: Uint8Array;
+};
+
+const buildBatchPublicData = async (params: BatchDataParams): Promise<L1_BatchPublicDataV1Full> => {
+  const batchIndex = params.snapshot.lastFinalizedBatchIndex + 1n;
+  const prevBatchIndex = params.snapshot.lastFinalizedBatchIndex;
+  let context = createCircuitContext(
+    params.contractAddress,
+    ZERO_COIN_PUBLIC_KEY,
+    params.contractState,
+    defaultPrivateState,
+  );
+  const prevBatchCall = params.contract.circuits.getCommittedBatch(context, prevBatchIndex);
+  context = prevBatchCall.context as typeof context;
+  const prevBatchHash = prevBatchCall.result;
+  const prevStateCall = params.contract.circuits.getFinalizedStateRoot(context, prevBatchIndex);
+  context = prevStateCall.context as typeof context;
+  const prevStateRoot = prevStateCall.result;
+  const lastProcessedQueueIndex = computeLastProcessedQueueIndex(params.snapshot);
+  const queueHashCall = params.contract.circuits.getMessageRollingHash(context, lastProcessedQueueIndex);
+  const messageQueueHash = queueHashCall.result;
+
+  return {
+    version: 1n,
+    layer2ChainId: 0n,
+    rollupId: ZERO_BYTES_32,
+    batchIndex,
+    daStartHeight: 0n,
+    daEndHeight: 0n,
+    daCommitment: ZERO_BYTES_32,
+    lastProcessedQueueIndex,
+    messageQueueHash,
+    prevStateRoot,
+    prevBatchHash,
+    postStateRoot: randomBytes32(),
+    batchHash: params.batchHash,
+    withdrawRoot: params.withdrawRoot,
+  } satisfies L1_BatchPublicDataV1Full;
+};
+
+const buildSignatureVector = (digest: Uint8Array): Signature[] =>
+  DEFAULT_VERIFIER_SECRET_KEYS.map((sk, index) => signWithNonceRetry(digest, sk, index, SIGNATURE_MAX_NONCE));
+
+const signWithNonceRetry = (digest: Uint8Array, secretKey: bigint, signerIndex: number, limit: bigint): Signature => {
+  for (let nonce = SIGNATURE_NONCE; nonce < limit; nonce += 1n) {
+    const signature = Bridge.pureCircuits.signBytes32(digest, secretKey, nonce) as Signature;
+    if (signature.s >= JUBJUB_SCALAR_FIELD) {
+      continue;
+    }
+    try {
+      if (Bridge.pureCircuits.verifyBytes32(digest, signature)) {
+        return signature;
+      }
+    } catch {
+      // The signature isn't usable; try the next nonce.
+    }
+  }
+  throw new Error(`Unable to produce signature for signer ${signerIndex}`);
+};
+
+const strictPadBytes32Local = (value: string): Uint8Array => {
+  const bytes = Buffer.from(value, 'utf8');
+  if (bytes.length > 32) {
+    throw new Error(`Value '${value}' exceeds 32 bytes`);
+  }
+  const out = new Uint8Array(32);
+  out.set(bytes);
+  return out;
+};
+
+const uToBytes32LELocal = (value: bigint): Uint8Array => {
+  if (value < 0n) {
+    throw new Error('Negative values not supported');
+  }
+  const out = new Uint8Array(32);
+  let cursor = value;
+  for (let i = 0; i < 32; i += 1) {
+    out[i] = Number(cursor & 0xffn);
+    cursor >>= 8n;
+  }
+  if (cursor !== 0n) {
+    throw new Error('Integer does not fit in 32 bytes');
+  }
+  return out;
+};
+
+const concatBytes32ChunksLocal = (chunks: Uint8Array[]): Uint8Array => {
+  const out = new Uint8Array(chunks.length * 32);
+  chunks.forEach((chunk, index) => {
+    if (chunk.length !== 32) {
+      throw new Error(`Chunk at position ${index} must be 32 bytes`);
+    }
+    out.set(chunk, index * 32);
+  });
+  return out;
+};
+
+const ensureBytes32Length = (value: Uint8Array, label: string): Uint8Array => {
+  if (value.length !== 32) {
+    throw new Error(`${label} must be 32 bytes`);
+  }
+  return value;
+};
+
+const sha256Local = (data: Uint8Array): Uint8Array => {
+  const hash = createHash('sha256');
+  hash.update(data);
+  return new Uint8Array(hash.digest());
+};
+
+const BATCH_DOMAIN = strictPadBytes32Local('mdn:bpd:v1full');
+
+const hashBatchPublicDataV1Full = (batch: L1_BatchPublicDataV1Full): Uint8Array => {
+  const chunks = [
+    BATCH_DOMAIN,
+    uToBytes32LELocal(batch.version),
+    uToBytes32LELocal(batch.layer2ChainId),
+    ensureBytes32Length(batch.rollupId, 'rollupId'),
+    uToBytes32LELocal(batch.batchIndex),
+    uToBytes32LELocal(batch.daStartHeight),
+    uToBytes32LELocal(batch.daEndHeight),
+    ensureBytes32Length(batch.daCommitment, 'daCommitment'),
+    uToBytes32LELocal(batch.lastProcessedQueueIndex),
+    ensureBytes32Length(batch.messageQueueHash, 'messageQueueHash'),
+    ensureBytes32Length(batch.prevStateRoot, 'prevStateRoot'),
+    ensureBytes32Length(batch.prevBatchHash, 'prevBatchHash'),
+    ensureBytes32Length(batch.postStateRoot, 'postStateRoot'),
+    ensureBytes32Length(batch.batchHash, 'batchHash'),
+    ensureBytes32Length(batch.withdrawRoot, 'withdrawRoot'),
+  ];
+  return sha256Local(concatBytes32ChunksLocal(chunks));
+};
+
+const randomBytes32 = (): Uint8Array => new Uint8Array(randomBytes(32));
+
+const waitForPendingWithdrawal = async (
+  publicDataProvider: PublicDataProvider,
+  contract: Bridge.Contract<BridgePrivateState>,
+  contractAddress: string,
+  recipient: Uint8Array,
+  predicate: (value: bigint) => boolean,
+  label: string,
+  attempts = 20,
+  delayMs = 3_000,
+): Promise<bigint> => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const contractState = await publicDataProvider.queryContractState(contractAddress);
+    if (!contractState) {
+      throw new Error('No contract state available');
+    }
+    const context = createCircuitContext(contractAddress, ZERO_COIN_PUBLIC_KEY, contractState, defaultPrivateState);
+    const pending = contract.circuits.getPendingWithdrawal(context, recipient).result;
+    if (predicate(pending)) {
+      return pending;
+    }
+    await sleep(delayMs);
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+};
+
+const computeIndexBits = (index: bigint, depth = WITHDRAW_TREE_DEPTH): boolean[] => {
+  const bits: boolean[] = [];
+  for (let i = 0; i < depth; i += 1) {
+    bits.push((index & (1n << BigInt(i))) !== 0n);
+  }
+  return bits;
+};
+
+const buildWithdrawLeaves = (leafIndex: number, leaf: Uint8Array): Uint8Array[] => {
+  const leaves: Uint8Array[] = Array.from({ length: leafIndex + 1 }, () => ZERO_BYTES_32);
+  leaves[leafIndex] = leaf;
+  return leaves;
+};

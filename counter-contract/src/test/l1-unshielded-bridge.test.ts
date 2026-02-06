@@ -9,7 +9,7 @@ import {
   decodeRawTokenType,
   encodeUserAddress,
   sampleUserAddress
-} from "@midnight-ntwrk/onchain-runtime-v1";
+} from "@midnight-ntwrk/onchain-runtime-v2";
 import {
   Contract,
   type L1_BatchPublicDataV1Full,

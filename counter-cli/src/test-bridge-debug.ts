@@ -1,9 +1,10 @@
 /* eslint-env node */
 /*
-BRIDGE_ADDRESS=d6b3cf71275708a6d219c84aba0b8360deca9eab70363f5219d6bcbe25a03a90 \
+BRIDGE_ADDRESS=02496a47d36653386f05e05e6fc0172f41777489df2b8a3a8788f466e3cbbb0e \
 MIDNIGHT_NETWORK=undeployed \
 npx --yes tsx --tsconfig tsconfig.json src/test-bridge-debug.ts
 */
+import { CompiledContract, getImpureCircuitIds, type ImpureCircuitId } from '@midnight-ntwrk/compact-js';
 import {
   ContractState,
   createCircuitContext,
@@ -11,7 +12,7 @@ import {
   sampleSigningKey,
   type WitnessContext,
 } from '@midnight-ntwrk/compact-runtime';
-import type { FinalizedTransaction, UnprovenTransaction } from '@midnight-ntwrk/ledger-v6';
+import type { FinalizedTransaction, UnprovenTransaction } from '@midnight-ntwrk/ledger-v7';
 import {
   type CallTxOptionsWithPrivateStateId,
   createCallTxOptions,
@@ -28,17 +29,10 @@ import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-pri
 import { getNetworkId, setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import {
-  BALANCE_TRANSACTION_TO_PROVE,
-  type BalancedProvingRecipe,
-  getImpureCircuitIds,
-  type ImpureCircuitId,
   type MidnightProvider,
   type MidnightProviders,
-  NOTHING_TO_PROVE,
   type ProofProvider,
-  type ProvenTransaction,
   SucceedEntirely,
-  TRANSACTION_TO_PROVE,
   type WalletProvider,
 } from '@midnight-ntwrk/midnight-js-types';
 import { assertIsContractAddress, parseCoinPublicKeyToHex } from '@midnight-ntwrk/midnight-js-utils';
@@ -174,6 +168,14 @@ const bridgeDebugConfig = {
   zkConfigPath: resolveBridgeDebugZkConfigPath(),
 };
 
+const bridgeDebugCompiledContract = CompiledContract.make<BridgeDebug.Contract<BridgeDebugPrivateState>>(
+  'BridgeDebug',
+  BridgeDebug.Contract,
+).pipe(
+  CompiledContract.withWitnesses(bridgeDebugWitnesses),
+  CompiledContract.withCompiledFileAssets(bridgeDebugConfig.zkConfigPath),
+);
+
 const deriveDefaultVerifierSet = () => DEFAULT_VERIFIER_SECRET_KEYS.map((sk) => BridgeDebug.pureCircuits.derivePk(sk));
 
 const shouldResetVerifierSet = (): boolean => {
@@ -194,13 +196,11 @@ async function ensureDefaultVerifierSet(bridgeContract: BridgeDebugContractHandl
   console.log('setVerifierSet txHash:', tx.public.txHash);
 }
 
-const createProofProviderWithTimeout = (url: string, timeoutMs: number): ProofProvider<BridgeDebugCircuits> => {
-  const baseProvider = httpClientProofProvider<BridgeDebugCircuits>(url);
-  return {
-    proveTx: (unprovenTx, proveTxConfig) =>
-      baseProvider.proveTx(unprovenTx, { ...(proveTxConfig ?? {}), timeout: timeoutMs }),
-  };
-};
+const createProofProviderWithTimeout = (
+  url: string,
+  zkConfigProvider: NodeZkConfigProvider<BridgeDebugCircuits>,
+  timeoutMs: number,
+): ProofProvider => httpClientProofProvider(url, zkConfigProvider, { timeout: timeoutMs });
 
 const configureBridgeDebugProviders = async (
   walletContext: api.WalletContext,
@@ -209,14 +209,15 @@ const configureBridgeDebugProviders = async (
   setNetworkId(config.networkId);
   const walletAndMidnightProvider: WalletProvider & MidnightProvider =
     await api.createWalletAndMidnightProvider(walletContext);
-  const baseProofProvider = createProofProviderWithTimeout(config.proofServer, config.proofTimeoutMs);
+  const zkConfigProvider = new NodeZkConfigProvider<BridgeDebugCircuits>(bridgeDebugConfig.zkConfigPath);
+  const baseProofProvider = createProofProviderWithTimeout(config.proofServer, zkConfigProvider, config.proofTimeoutMs);
   return {
     privateStateProvider: levelPrivateStateProvider<typeof BridgeDebugPrivateStateId, BridgeDebugPrivateState>({
       privateStateStoreName: bridgeDebugConfig.privateStateStoreName,
       walletProvider: walletAndMidnightProvider,
     }),
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),
-    zkConfigProvider: new NodeZkConfigProvider<BridgeDebugCircuits>(bridgeDebugConfig.zkConfigPath),
+    zkConfigProvider,
     proofProvider: baseProofProvider,
     walletProvider: walletAndMidnightProvider,
     midnightProvider: walletAndMidnightProvider,
@@ -325,18 +326,28 @@ const deployBridgeDebug = async (
   }
 
   const signingKey = sampleSigningKey();
-  const deployContractInstance = new BridgeDebug.Contract(bridgeDebugWitnesses);
-  const originalInitialState = deployContractInstance.initialState.bind(deployContractInstance);
-  deployContractInstance.initialState = (constructorContext, ...constructorArgsOverride) => {
-    const result = originalInitialState(constructorContext, ...constructorArgsOverride);
-    return {
-      ...result,
-      currentContractState: createPrunedContractState(result.currentContractState, initialCircuitIds),
-    };
-  };
+  class PrunedBridgeDebugContract extends BridgeDebug.Contract<BridgeDebugPrivateState> {
+    initialState(
+      constructorContext: Parameters<BridgeDebug.Contract<BridgeDebugPrivateState>['initialState']>[0],
+      ...constructorArgsOverride: BridgeDebugConstructorArgs
+    ) {
+      const result = super.initialState(constructorContext, ...constructorArgsOverride);
+      return {
+        ...result,
+        currentContractState: createPrunedContractState(result.currentContractState, initialCircuitIds),
+      };
+    }
+  }
+  const deployCompiledContract = CompiledContract.make<BridgeDebug.Contract<BridgeDebugPrivateState>>(
+    'BridgeDebug',
+    PrunedBridgeDebugContract,
+  ).pipe(
+    CompiledContract.withWitnesses(bridgeDebugWitnesses),
+    CompiledContract.withCompiledFileAssets(bridgeDebugConfig.zkConfigPath),
+  );
 
   const deployOptions = {
-    contract: deployContractInstance,
+    compiledContract: deployCompiledContract,
     privateStateId: BridgeDebugPrivateStateId,
     initialPrivateState: privateState,
     args: constructorArgs,
@@ -344,8 +355,8 @@ const deployBridgeDebug = async (
   };
 
   const coinPublicKey = parseCoinPublicKeyToHex(providers.walletProvider.getCoinPublicKey(), getNetworkId());
-  const unprovenDeployTxData = createUnprovenDeployTxFromVerifierKeys(
-    initialVerifierKeys,
+  const unprovenDeployTxData = await createUnprovenDeployTxFromVerifierKeys(
+    providers.zkConfigProvider,
     coinPublicKey,
     deployOptions,
     providers.walletProvider.getEncryptionPublicKey(),
@@ -353,7 +364,6 @@ const deployBridgeDebug = async (
 
   const finalizedTxData = await submitTx(providers, {
     unprovenTx: unprovenDeployTxData.private.unprovenTx,
-    newCoins: unprovenDeployTxData.private.newCoins,
   });
   if (finalizedTxData.status !== SucceedEntirely) {
     throw new DeployTxFailedError(finalizedTxData);
@@ -372,7 +382,7 @@ const deployBridgeDebug = async (
     console.log(`Inserting ${remainingVerifierKeys.length} verifier keys after deployment...`);
     for (const [index, [circuitId, verifierKey]] of remainingVerifierKeys.entries()) {
       console.log(`Inserting verifier key ${index + 1}/${remainingVerifierKeys.length} for ${circuitId}...`);
-      await submitInsertVerifierKeyTx(providers, contractAddress, circuitId, verifierKey);
+      await submitInsertVerifierKeyTx(providers, bridgeDebugCompiledContract, contractAddress, circuitId, verifierKey);
     }
   }
 
@@ -387,7 +397,7 @@ const deployBridgeDebug = async (
     },
     callTx: createCircuitCallTxInterface(
       providers,
-      bridgeDebugContractInstance,
+      bridgeDebugCompiledContract,
       contractAddress,
       BridgeDebugPrivateStateId,
     ),
@@ -401,7 +411,7 @@ const resolveBridgeDebugHandle = (
   contractAddress,
   callTx: createCircuitCallTxInterface(
     providers,
-    bridgeDebugContractInstance,
+    bridgeDebugCompiledContract,
     contractAddress,
     BridgeDebugPrivateStateId,
   ),
@@ -442,26 +452,12 @@ type DryRunResult = {
   error?: unknown;
 };
 
-const proveTransaction = async (
+const proveAndBalanceTransaction = async (
   providers: BridgeDebugProviders,
-  recipe: BalancedProvingRecipe,
-  circuitId?: BridgeDebugCircuits,
-): Promise<ProvenTransaction | FinalizedTransaction> => {
-  const proveTxConfig = circuitId ? { zkConfig: await providers.zkConfigProvider.get(circuitId) } : undefined;
-
-  switch (recipe.type) {
-    case TRANSACTION_TO_PROVE:
-      return await providers.proofProvider.proveTx(recipe.transaction as UnprovenTransaction, proveTxConfig);
-    case BALANCE_TRANSACTION_TO_PROVE: {
-      const transactionToBalance = recipe.transactionToBalance as UnprovenTransaction;
-      const merged = transactionToBalance.merge(recipe.transactionToProve);
-      return await providers.proofProvider.proveTx(merged, proveTxConfig);
-    }
-    case NOTHING_TO_PROVE:
-      return recipe.transaction as FinalizedTransaction;
-    default:
-      throw new Error('Unknown proving recipe type');
-  }
+  unprovenTx: UnprovenTransaction,
+): Promise<FinalizedTransaction> => {
+  const unboundTx = await providers.proofProvider.proveTx(unprovenTx);
+  return await providers.walletProvider.balanceTx(unboundTx);
 };
 
 const dryRunFinalizedTx = async (finalizedTx: FinalizedTransaction, nodeUrl: string): Promise<DryRunResult> => {
@@ -489,7 +485,7 @@ const submitFinalizeBatchWithDryRun = async (params: {
   finalizeTimestamp: bigint;
 }): Promise<{ txHash: string }> => {
   const callOptions = createCallTxOptions(
-    bridgeDebugContractInstance,
+    bridgeDebugCompiledContract,
     'finalizeBatch',
     params.contractAddress,
     BridgeDebugPrivateStateId,
@@ -505,14 +501,13 @@ const submitFinalizeBatchWithDryRun = async (params: {
   };
 
   const unprovenCallTxData = await createUnprovenCallTx(params.providers, callTxOptions);
-  const recipe = await params.providers.walletProvider.balanceTx(
-    unprovenCallTxData.private.unprovenTx,
-    unprovenCallTxData.private.newCoins,
-  );
-  const toSubmit = await proveTransaction(params.providers, recipe, 'finalizeBatch');
-  const bound = toSubmit.bind() as FinalizedTransaction;
+  const finalizedTx = await proveAndBalanceTransaction(params.providers, unprovenCallTxData.private.unprovenTx);
+  const dryRun = await dryRunFinalizedTx(finalizedTx, params.nodeUrl);
+  if (!dryRun.ok) {
+    throw new Error('finalizeBatch dryRun failed');
+  }
 
-  const txId = await params.providers.midnightProvider.submitTx(bound);
+  const txId = await params.providers.midnightProvider.submitTx(finalizedTx);
   const finalizedTxData = await params.providers.publicDataProvider.watchForTxData(txId);
   if (finalizedTxData.status !== SucceedEntirely) {
     throw new Error(`finalizeBatch failed with status ${String(finalizedTxData.status)}`);

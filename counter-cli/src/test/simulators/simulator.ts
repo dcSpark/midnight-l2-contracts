@@ -193,6 +193,7 @@ export class TestEnvironment {
           'counter-proof-server',
         ),
       };
+      await this.waitForLocalServicesReady();
     }
     this.logger.info(`Configuration:${JSON.stringify(this.testConfig)}`);
     this.logger.info('Test containers started');
@@ -209,7 +210,7 @@ export class TestEnvironment {
   };
 
   static getProofServerContainer = async (env: string) =>
-    await new GenericContainer('bricktowers/proof-server:6.1.0-alpha.6')
+    await new GenericContainer('midnightntwrk/proof-server:7.0.1')
       .withExposedPorts(6300)
       .withCommand(['midnight-proof-server', '--network', env])
       .withEnvironment({ RUST_BACKTRACE: 'full' })
@@ -232,6 +233,29 @@ export class TestEnvironment {
     } else {
       this.logger.warn(`Unable to reach indexer at ${this.testConfig.dappConfig.indexer}; tests may fail`);
     }
+  }
+
+  private async waitForLocalServicesReady(): Promise<void> {
+    const maxAttempts = 30;
+    const sleepMs = 2_000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const nodeHealthy = await TestEnvironment.nodeIsHealthy(this.testConfig.dappConfig.node);
+      const indexerHealthy = await TestEnvironment.indexerIsHealthy(this.testConfig.dappConfig.indexer);
+
+      if (nodeHealthy && indexerHealthy) {
+        this.logger.info('Node and indexer are healthy.');
+        return;
+      }
+
+      this.logger.info(
+        `Waiting for services to be healthy (attempt ${attempt}/${maxAttempts}): ` +
+          `node=${nodeHealthy}, indexer=${indexerHealthy}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, sleepMs));
+    }
+
+    this.logger.warn('Timed out waiting for node/indexer readiness; wallet sync may log transient errors.');
   }
 
   private static async proofServerIsHealthy(baseUrl: string): Promise<boolean> {

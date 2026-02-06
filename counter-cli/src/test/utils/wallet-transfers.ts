@@ -1,8 +1,8 @@
+import * as ledger from '@midnight-ntwrk/ledger-v7';
+import { MidnightBech32m, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { CombinedTokenTransfer } from '@midnight-ntwrk/wallet-sdk-facade';
 import * as api from '../../api';
-import * as ledger from '@midnight-ntwrk/ledger-v6';
 import { tokenValue } from './utils';
-import { MidnightBech32m, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 
 //allows to transfer unshielded tokens
 //TODO: correct error with address
@@ -18,26 +18,22 @@ export async function sendUnshieldedToken(wallet: api.WalletContext, address: st
         },
       ],
     },
-  ];  
+  ];
 
   const txTtl = new Date(Date.now() + 300 * 60 * 1000); // 30 min
 
   const transferRecipe = await wallet.wallet.transferTransaction(
-    wallet.shieldedSecretKeys,
-    wallet.dustSecretKey,
     tokenTransfer,
-    txTtl,
+    {
+      shieldedSecretKeys: wallet.shieldedSecretKeys,
+      dustSecretKey: wallet.dustSecretKey,
+    },
+    { ttl: txTtl, payFees: true },
   );
-
-  const signedTx = await wallet.wallet.signTransaction(transferRecipe.transaction, (payload) =>
+  const signedRecipe = await wallet.wallet.signRecipe(transferRecipe, (payload) =>
     wallet.unshieldedKeystore.signData(payload),
   );
-
-  const finalizedTx = await wallet.wallet.finalizeTransaction({
-    ...transferRecipe,
-    transaction: signedTx,
-  });
-
+  const finalizedTx = await wallet.wallet.finalizeRecipe(signedRecipe);
   const submittedTxHash = await wallet.wallet.submitTransaction(finalizedTx);
 
   // return txId;
@@ -45,11 +41,14 @@ export async function sendUnshieldedToken(wallet: api.WalletContext, address: st
 }
 
 //allows to transfer arbitrary unshielded tokens
-export async function sendArbitraryUnshieldedToken(wallet: api.WalletContext, address: string, amount: bigint): Promise<string> {
-
+export async function sendArbitraryUnshieldedToken(
+  wallet: api.WalletContext,
+  address: string,
+  amount: bigint,
+): Promise<string> {
   //address Hex format
   const addressBech32m = MidnightBech32m.parse(address);
-  const addressHex = UnshieldedAddress.codec.decode("undeployed", addressBech32m);
+  const addressHex = UnshieldedAddress.codec.decode('undeployed', addressBech32m);
 
   const outputs = [
     {
@@ -63,29 +62,20 @@ export async function sendArbitraryUnshieldedToken(wallet: api.WalletContext, ad
   const intent = ledger.Intent.new(new Date(Date.now() + 30 * 60 * 1000));
   intent.guaranteedUnshieldedOffer = ledger.UnshieldedOffer.new([], outputs, []);
 
-  const arbitraryTx = ledger.Transaction.fromParts("undeployed", undefined, undefined, intent);
+  const arbitraryTx = ledger.Transaction.fromParts('undeployed', undefined, undefined, intent);
 
-   const recipe = await wallet.wallet.balanceTransaction(
-      wallet.shieldedSecretKeys,
-      wallet.dustSecretKey,
-      arbitraryTx,
-      new Date(Date.now() + 30 * 60 * 1000),
-    );
+  const recipe = await wallet.wallet.balanceUnprovenTransaction(
+    arbitraryTx,
+    {
+      shieldedSecretKeys: wallet.shieldedSecretKeys,
+      dustSecretKey: wallet.dustSecretKey,
+    },
+    { ttl: new Date(Date.now() + 30 * 60 * 1000), tokenKindsToBalance: 'all' },
+  );
 
-     if (recipe.type !== 'TransactionToProve') {
-      throw new Error('Expected a transaction to prove');
-    }
+  const signedRecipe = await wallet.wallet.signRecipe(recipe, (payload) => wallet.unshieldedKeystore.signData(payload));
+  const finalizedTx = await wallet.wallet.finalizeRecipe(signedRecipe);
+  const submittedTxHash = await wallet.wallet.submitTransaction(finalizedTx);
 
-    const signedTx = await wallet.wallet.signTransaction(recipe.transaction, (payload) =>
-      wallet.unshieldedKeystore.signData(payload),
-    );
-
-     const finalizedTx = await wallet.wallet.finalizeTransaction({
-      ...recipe,
-      transaction: signedTx,
-    });
-
-    const submittedTxHash = await wallet.wallet.submitTransaction(finalizedTx);
-
-    return submittedTxHash;
+  return submittedTxHash;
 }

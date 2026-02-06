@@ -1,5 +1,5 @@
 import type { ProofProvider, ProveTxConfig, ProvenTransaction  } from "@midnight-ntwrk/midnight-js-types";
-import type { UnprovenTransaction } from "@midnight-ntwrk/ledger-v6";
+import type { UnprovenTransaction } from "@midnight-ntwrk/ledger-v7";
 import { httpClientProofProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
 
 export const proofClient = <K extends string>(
