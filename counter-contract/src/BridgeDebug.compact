@@ -2,7 +2,7 @@
 //
 // Minimal wrapper around L1Rollup to reproduce commitBatch/finalizeBatch behavior.
 
-pragma language_version >= 0.16;
+pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 import Signer;
@@ -33,7 +33,7 @@ constructor(
   rollupId_: Bytes<32>,
   genesisStateRoot_: Bytes<32>,
   genesisBatchHash_: Bytes<32>,
-  verifierSet_: Vector<3, CurvePoint>,
+  verifierSet_: Vector<3, NativePoint>,
   signatureThreshold_: Uint<8>,
   initialSequencer_: Bytes<32>,
   initialFinalizer_: Bytes<32>
@@ -77,7 +77,7 @@ export circuit finalizeBatch(
 // ADMIN
 // ============================================================================
 
-export circuit setVerifierSet(newSet_: Vector<3, CurvePoint>): [] { L1_setVerifierSet(disclose(newSet_)); }
+export circuit setVerifierSet(newSet_: Vector<3, NativePoint>): [] { L1_setVerifierSet(disclose(newSet_)); }
 
 // ============================================================================
 // QUERY SURFACE

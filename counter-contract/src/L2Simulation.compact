@@ -7,7 +7,7 @@
 //
 // This contract is used for L2 simulation tests.
 
-pragma language_version >= 0.16;
+pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 import Signer;
@@ -38,7 +38,7 @@ export struct WithdrawNIGHTResult {
 // ============================================================================
 
 // Oracle signers (3 signers for threshold signatures)
-export sealed ledger signers: Vector<3, CurvePoint>;
+export sealed ledger signers: Vector<3, NativePoint>;
 
 // Current L2 state root
 export ledger stateRoot: Bytes<32>;
@@ -47,7 +47,7 @@ export ledger stateRoot: Bytes<32>;
 // CONSTRUCTOR
 // ============================================================================
 
-constructor(newSigners: Vector<3, CurvePoint>, initialStateRoot: Bytes<32>) {
+constructor(newSigners: Vector<3, NativePoint>, initialStateRoot: Bytes<32>) {
   signers = disclose(newSigners);
   stateRoot = disclose(initialStateRoot);
   
@@ -105,7 +105,7 @@ export pure circuit hashMerkleNode(left: Bytes<32>, right: Bytes<32>): Bytes<32>
 // ============================================================================
 
 // Check if a public key is a registered signer
-export circuit isSigner(pk_: CurvePoint): Boolean {
+export circuit isSigner(pk_: NativePoint): Boolean {
   const pk = disclose(pk_);
   return pk == signers[0] || pk == signers[1] || pk == signers[2];
 }

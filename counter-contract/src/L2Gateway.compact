@@ -9,7 +9,7 @@
 // - Credit balances on deposit finalization
 // - Legacy deposit/withdraw support (for L2 test contract compatibility)
 
-pragma language_version >= 0.16;
+pragma language_version >= 0.20;
 
 module L2Gateway {
 
@@ -99,7 +99,7 @@ module L2Gateway {
   //   depositId: Uint<64>;
   // }
   //
-  // export circuit legacyWithdraw(wi: WithdrawInfo, signerPk: CurvePoint): [] {
+  // export circuit legacyWithdraw(wi: WithdrawInfo, signerPk: NativePoint): [] {
   //   const receiver = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
   //
   //   // send coin to L1 receiver
