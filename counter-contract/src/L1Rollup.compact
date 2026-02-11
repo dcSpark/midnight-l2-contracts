@@ -96,7 +96,7 @@ module L1Rollup {
   export ledger firstCrossDomainMessageIndex: Uint<64>;
   export ledger nextCrossDomainMessageIndex: Uint<64>;
   export ledger nextUnfinalizedQueueIndex: Uint<64>;
-  ledger messageRollingHashes: Map<Uint<64>, Bytes<32>>;
+  export ledger messageRollingHashes: Map<Uint<64>, Bytes<32>>;
   ledger messageTimestamps: Map<Uint<64>, Uint<64>>;
 
   // Deposit preimages (Compact has no logs)
@@ -121,7 +121,7 @@ module L1Rollup {
   // ledger feeCoins: Map<Uint<64>, QualifiedShieldedCoinInfo>;
 
   // Pending withdrawals (recipient -> amount)
-  ledger pendingWithdrawals: Map<Bytes<32>, Uint<128>>;
+  export ledger pendingWithdrawals: Map<Bytes<32>, Uint<128>>;
 
   // ============================================================================
   // WITNESSES
@@ -210,7 +210,7 @@ module L1Rollup {
   // L1 MESSAGE QUEUE (Layer 3)
   // ============================================================================
 
-  export circuit getRollingHashOrZero(index: Uint<64>): Bytes<32> {
+  circuit getRollingHashOrZero(index: Uint<64>): Bytes<32> {
     return messageRollingHashes.member(index) ? messageRollingHashes.lookup(index) : zero32();
   }
 
@@ -540,7 +540,7 @@ module L1Rollup {
     sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
   }
 
-  export circuit getPendingWithdrawal(recipient: Bytes<32>): Uint<128> {
+  circuit getPendingWithdrawal(recipient: Bytes<32>): Uint<128> {
     return pendingWithdrawals.member(recipient) ? pendingWithdrawals.lookup(recipient) : (0 as Uint<128>);
   }
 
@@ -770,45 +770,45 @@ module L1Rollup {
   // VIEWS / GETTERS
   // ============================================================================
 
-  export circuit getLastFinalizedBatchIndex(): Uint<64> { return miscData.lastFinalizedBatchIndex; }
-  export circuit getLastCommittedBatchIndex(): Uint<64> { return miscData.lastCommittedBatchIndex; }
+  circuit getLastFinalizedBatchIndex(): Uint<64> { return miscData.lastFinalizedBatchIndex; }
+  circuit getLastCommittedBatchIndex(): Uint<64> { return miscData.lastCommittedBatchIndex; }
 
-  export circuit isBatchFinalized(batchIndex: Uint<64>): Boolean {
+  circuit isBatchFinalized(batchIndex: Uint<64>): Boolean {
     return batchIndex <= miscData.lastFinalizedBatchIndex;
   }
 
-  export circuit getCommittedBatch(batchIndex_: Uint<64>): Bytes<32> {
+  circuit getCommittedBatch(batchIndex_: Uint<64>): Bytes<32> {
     const i = disclose(batchIndex_);
     return committedBatches.member(i) ? committedBatches.lookup(i) : zero32();
   }
 
-  export circuit getFinalizedStateRoot(batchIndex_: Uint<64>): Bytes<32> {
+  circuit getFinalizedStateRoot(batchIndex_: Uint<64>): Bytes<32> {
     const i = disclose(batchIndex_);
     return finalizedStateRoots.member(i) ? finalizedStateRoots.lookup(i) : zero32();
   }
 
-  export circuit getWithdrawRoot(batchIndex_: Uint<64>): Bytes<32> {
+  circuit getWithdrawRoot(batchIndex_: Uint<64>): Bytes<32> {
     const i = disclose(batchIndex_);
     return withdrawRoots.member(i) ? withdrawRoots.lookup(i) : zero32();
   }
 
-  export circuit getMessageRollingHash(index_: Uint<64>): Bytes<32> {
+  circuit getMessageRollingHash(index_: Uint<64>): Bytes<32> {
     const i = disclose(index_);
     return messageRollingHashes.member(i) ? messageRollingHashes.lookup(i) : zero32();
   }
 
-  export circuit getMessageTimestamp(index_: Uint<64>): Uint<64> {
+  circuit getMessageTimestamp(index_: Uint<64>): Uint<64> {
     const i = disclose(index_);
     return messageTimestamps.member(i) ? messageTimestamps.lookup(i) : (0 as Uint<64>);
   }
 
-  export circuit getNextUnfinalizedQueueIndex(): Uint<64> { return nextUnfinalizedQueueIndex; }
-  export circuit getNextCrossDomainMessageIndex(): Uint<64> { return nextCrossDomainMessageIndex; }
+  circuit getNextUnfinalizedQueueIndex(): Uint<64> { return nextUnfinalizedQueueIndex; }
+  circuit getNextCrossDomainMessageIndex(): Uint<64> { return nextCrossDomainMessageIndex; }
 
-  export circuit getLockedNIGHT(): Uint<128> { return lockedNIGHT; }
-  export circuit getFeeVault(): Uint<128> { return feeVault; }
+  circuit getLockedNIGHT(): Uint<128> { return lockedNIGHT; }
+  circuit getFeeVault(): Uint<128> { return feeVault; }
 
-  export circuit getL1ToL2Deposit(queueIndex_: Uint<64>): PT_L1ToL2DepositMessage {
+  circuit getL1ToL2Deposit(queueIndex_: Uint<64>): PT_L1ToL2DepositMessage {
     const i = disclose(queueIndex_);
     assert(l1ToL2Deposits.member(i), "UNKNOWN_QUEUE_INDEX");
     return l1ToL2Deposits.lookup(i);

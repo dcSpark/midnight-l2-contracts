@@ -23,6 +23,30 @@ export pure circuit verifyBytes32(msg: Bytes<32>, signature: Signature): Boolean
   return verifySignature<Bytes<32>>(msg, signature);
 }
 
+// Ledger variables
+export {
+  L1_owner,
+  L1_layer2ChainId,
+  L1_rollupId,
+  L1_verifierSet,
+  L1_signatureThreshold,
+  L1_sequencers,
+  L1_finalizers,
+  L1_committedBatches,
+  L1_finalizedStateRoots,
+  L1_withdrawRoots,
+  L1_miscData,
+  L1_firstCrossDomainMessageIndex,
+  L1_nextCrossDomainMessageIndex,
+  L1_nextUnfinalizedQueueIndex,
+  L1_l1ToL2Deposits,
+  L1_executedL2ToL1Messages,
+  L1_lockedNIGHT,
+  L1_feeVault,
+  L1_messageRollingHashes,
+  L1_pendingWithdrawals,
+};
+
 // ============================================================================
 // CONSTRUCTOR
 // ============================================================================
@@ -83,12 +107,12 @@ export circuit setVerifierSet(newSet_: Vector<3, NativePoint>): [] { L1_setVerif
 // QUERY SURFACE
 // ============================================================================
 
-export circuit lastFinalizedBatchIndex(): Uint<64> { return L1_getLastFinalizedBatchIndex(); }
-export circuit lastCommittedBatchIndex(): Uint<64> { return L1_getLastCommittedBatchIndex(); }
+// export circuit lastFinalizedBatchIndex(): Uint<64> { return L1_getLastFinalizedBatchIndex(); }
+// export circuit lastCommittedBatchIndex(): Uint<64> { return L1_getLastCommittedBatchIndex(); }
 
-export circuit getCommittedBatch(batchIndex_: Uint<64>): Bytes<32> { return L1_getCommittedBatch(disclose(batchIndex_)); }
-export circuit getFinalizedStateRoot(batchIndex_: Uint<64>): Bytes<32> { return L1_getFinalizedStateRoot(disclose(batchIndex_)); }
+// export circuit getCommittedBatch(batchIndex_: Uint<64>): Bytes<32> { return L1_getCommittedBatch(disclose(batchIndex_)); }
+// export circuit getFinalizedStateRoot(batchIndex_: Uint<64>): Bytes<32> { return L1_getFinalizedStateRoot(disclose(batchIndex_)); }
 
-export circuit getMessageRollingHash(index_: Uint<64>): Bytes<32> { return L1_getMessageRollingHash(disclose(index_)); }
-export circuit getNextCrossDomainMessageIndex(): Uint<64> { return L1_getNextCrossDomainMessageIndex(); }
-export circuit getNextUnfinalizedQueueIndex(): Uint<64> { return L1_getNextUnfinalizedQueueIndex(); }
+// export circuit getMessageRollingHash(index_: Uint<64>): Bytes<32> { return L1_getMessageRollingHash(disclose(index_)); }
+// export circuit getNextCrossDomainMessageIndex(): Uint<64> { return L1_getNextCrossDomainMessageIndex(); }
+// export circuit getNextUnfinalizedQueueIndex(): Uint<64> { return L1_getNextUnfinalizedQueueIndex(); }

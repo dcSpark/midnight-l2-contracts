@@ -16,7 +16,7 @@ import {
 import { contractConfig, type Config } from './config';
 
 import {
-  ContractState,
+  createCircuitContext,
   encodeCoinPublicKey,
   sampleSigningKey,
   type ContractAddress,
@@ -31,7 +31,6 @@ import {
   createUnprovenDeployTxFromVerifierKeys,
   DeployTxFailedError,
   findDeployedContract,
-  submitInsertVerifierKeyTx,
   submitTx,
 } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
@@ -196,7 +195,6 @@ const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n];
 const DEFAULT_SIGNATURE_THRESHOLD = 1n;
 const DEFAULT_LAYER2_CHAIN_ID = 0n;
 const ZERO_BYTES_32 = new Uint8Array(32);
-const DEFAULT_INITIAL_VERIFIER_KEY_COUNT = 1;
 
 type BridgeConstructorArgs = [
   Uint8Array,
@@ -227,55 +225,49 @@ const createDefaultConstructorArgs = (ownerBytes: Uint8Array): BridgeConstructor
   ];
 };
 
-const resolveInitialVerifierKeyCount = () => {
-  const envValue = process.env.DEPLOY_INITIAL_VERIFIER_KEYS;
-  if (!envValue) {
-    return DEFAULT_INITIAL_VERIFIER_KEY_COUNT;
-  }
-  const parsed = Number.parseInt(envValue, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_INITIAL_VERIFIER_KEY_COUNT;
-};
+/**
+ * Sign all unshielded offers in a transaction's intents, using the correct
+ * proof marker for Intent.deserialize. This works around a bug in the wallet
+ * SDK where signRecipe hardcodes 'pre-proof', which fails for proven
+ * (UnboundTransaction) intents that contain 'proof' data.
+ */
+const signTransactionIntents = (
+  tx: { intents?: Map<number, { serialize: () => Uint8Array }> },
+  signFn: (payload: Uint8Array) => ledger.Signature,
+  proofMarker: 'proof' | 'pre-proof',
+): void => {
+  if (!tx.intents || tx.intents.size === 0) return;
 
-const createPrunedContractState = (contractState: ContractState, keepCircuits: BridgeCircuits[]): ContractState => {
-  const prunedState = new ContractState();
-  prunedState.data = contractState.data;
-  prunedState.balance = contractState.balance;
-  prunedState.maintenanceAuthority = contractState.maintenanceAuthority;
+  for (const segment of tx.intents.keys()) {
+    const intent = tx.intents.get(segment);
+    if (!intent) continue;
 
-  for (const circuitId of keepCircuits) {
-    const operation = contractState.operation(circuitId);
-    if (!operation) {
-      throw new Error(`Missing operation for circuit '${String(circuitId)}' in constructor state`);
-    }
-    prunedState.setOperation(circuitId, operation);
-  }
-
-  return prunedState;
-};
-
-const finalizeBalancedTransaction = async (
-  walletContext: WalletContext,
-  recipe: Parameters<WalletFacade['finalizeRecipe']>[0],
-  contextLabel: string,
-): Promise<ledger.FinalizedTransaction> => {
-  try {
-    const signedRecipe = await walletContext.wallet.signRecipe(recipe, (payload) =>
-      walletContext.unshieldedKeystore.signData(payload),
+    const cloned = ledger.Intent.deserialize<ledger.SignatureEnabled, ledger.Proofish, ledger.PreBinding>(
+      'signature',
+      proofMarker,
+      'pre-binding',
+      intent.serialize(),
     );
-    return await walletContext.wallet.finalizeRecipe(signedRecipe);
-  } catch (error) {
-    logger?.error({ error, context: contextLabel }, 'Failed to finalize balanced transaction');
-    throw error;
-  }
-};
 
-export type BridgeQueryState = {
-  readonly nextCrossDomainMessageIndex: bigint;
-  readonly nextUnfinalizedQueueIndex: bigint;
-  readonly lockedNIGHT: bigint;
-  readonly feeVault: bigint;
-  readonly withdrawRoot: Uint8Array;
-  readonly withdrawMessageCount: bigint;
+    const sigData = cloned.signatureData(segment);
+    const signature = signFn(sigData);
+
+    if (cloned.fallibleUnshieldedOffer) {
+      const sigs = cloned.fallibleUnshieldedOffer.inputs.map(
+        (_: ledger.UtxoSpend, i: number) => cloned.fallibleUnshieldedOffer!.signatures.at(i) ?? signature,
+      );
+      cloned.fallibleUnshieldedOffer = cloned.fallibleUnshieldedOffer.addSignatures(sigs);
+    }
+
+    if (cloned.guaranteedUnshieldedOffer) {
+      const sigs = cloned.guaranteedUnshieldedOffer.inputs.map(
+        (_: ledger.UtxoSpend, i: number) => cloned.guaranteedUnshieldedOffer!.signatures.at(i) ?? signature,
+      );
+      cloned.guaranteedUnshieldedOffer = cloned.guaranteedUnshieldedOffer.addSignatures(sigs);
+    }
+
+    (tx.intents as Map<number, unknown>).set(segment, cloned);
+  }
 };
 
 export type BridgeL1ToL2DepositMessage = {
@@ -286,6 +278,8 @@ export type BridgeL1ToL2DepositMessage = {
   readonly gasLimit: bigint;
   readonly dataHash: Uint8Array;
 };
+
+const ZERO_COIN_PUBLIC_KEY = '0'.repeat(64);
 
 const getOwnerBytes = (providers: BridgeProviders): Uint8Array => {
   if (!providers.walletProvider) {
@@ -298,55 +292,44 @@ const getOwnerBytes = (providers: BridgeProviders): Uint8Array => {
   return encodeCoinPublicKey(coinPublicKey);
 };
 
-const getBridgeCallTxInterface = async (
+/** Build a circuit context from indexer contract state for off-chain getter reads (queryContractState + circuits). */
+const getBridgeStateContext = async (
   providers: BridgeProviders,
   contractAddress: ContractAddress,
-): Promise<ReturnType<typeof createCircuitCallTxInterface> | null> => {
+): Promise<{ context: ReturnType<typeof createCircuitContext>; contract: BridgeContract } | null> => {
   assertIsContractAddress(contractAddress);
   if (!providers.publicDataProvider) {
-    throw new Error('Public data provider is not available');
-  }
-  if (
-    !providers.walletProvider ||
-    !providers.privateStateProvider ||
-    !providers.zkConfigProvider ||
-    !providers.proofProvider
-  ) {
-    throw new Error('Contract transaction providers are not available');
+    return null;
   }
   const contractState = await providers.publicDataProvider.queryContractState(contractAddress);
   if (contractState == null) {
     return null;
   }
-  return createCircuitCallTxInterface(providers, bridgeCompiledContract, contractAddress, BridgePrivateStateId);
+  const context = createCircuitContext<BridgePrivateState>(
+    contractAddress,
+    ZERO_COIN_PUBLIC_KEY,
+    contractState,
+    defaultPrivateState,
+  );
+  return { context, contract: bridgeContractInstance };
 };
 
-export const getBridgeQueryState = async (
+const ZERO_BYTES_32_BRIDGE = new Uint8Array(32);
+
+/** Recommended: get Ledger from indexer state (queryContractState + Bridge.ledger). Returns null if no state. */
+export const getBridgeLedger = async (
   providers: BridgeProviders,
   contractAddress: ContractAddress,
-): Promise<BridgeQueryState | null> => {
-  logger.info('Checking bridge contract state...');
-  const callTx = await getBridgeCallTxInterface(providers, contractAddress);
-  if (!callTx) {
-    logger.info('Bridge state: unavailable');
+): Promise<ReturnType<typeof Bridge.ledger> | null> => {
+  assertIsContractAddress(contractAddress);
+  if (!providers.publicDataProvider) {
     return null;
   }
-
-  const nextCrossDomainMessageIndex = await callTx.getNextCrossDomainMessageIndex();
-  const nextUnfinalizedQueueIndex = await callTx.getNextUnfinalizedQueueIndex();
-  const lockedNIGHT = await callTx.getLockedNIGHT();
-  const feeVault = await callTx.getFeeVault();
-  const withdrawRoot = await callTx.getWithdrawRoot();
-  const withdrawMessageCount = await callTx.getWithdrawMessageCount();
-
-  return {
-    nextCrossDomainMessageIndex: nextCrossDomainMessageIndex.private.result,
-    nextUnfinalizedQueueIndex: nextUnfinalizedQueueIndex.private.result,
-    lockedNIGHT: lockedNIGHT.private.result,
-    feeVault: feeVault.private.result,
-    withdrawRoot: withdrawRoot.private.result,
-    withdrawMessageCount: withdrawMessageCount.private.result,
-  };
+  const contractState = await providers.publicDataProvider.queryContractState(contractAddress);
+  if (contractState == null) {
+    return null;
+  }
+  return Bridge.ledger(contractState.data);
 };
 
 export const getMessageRollingHash = async (
@@ -354,12 +337,11 @@ export const getMessageRollingHash = async (
   contractAddress: ContractAddress,
   index: bigint,
 ): Promise<Uint8Array | null> => {
-  const callTx = await getBridgeCallTxInterface(providers, contractAddress);
-  if (!callTx) {
+  const ledgerState = await getBridgeLedger(providers, contractAddress);
+  if (ledgerState == null || !ledgerState.L1_messageRollingHashes.member(index)) {
     return null;
   }
-  const result = await callTx.getMessageRollingHash(index);
-  return result.private.result;
+  return ledgerState.L1_messageRollingHashes.lookup(index);
 };
 
 export const getMessageTimestamp = async (
@@ -367,12 +349,16 @@ export const getMessageTimestamp = async (
   contractAddress: ContractAddress,
   index: bigint,
 ): Promise<bigint | null> => {
-  const callTx = await getBridgeCallTxInterface(providers, contractAddress);
-  if (!callTx) {
+  const stateContext = await getBridgeStateContext(providers, contractAddress);
+  if (!stateContext) {
     return null;
   }
-  const result = await callTx.getMessageTimestamp(index);
-  return result.private.result;
+  const circuits = stateContext.contract.circuits as Record<
+    string,
+    (ctx: unknown, ...args: unknown[]) => { result: unknown; context: unknown }
+  >;
+  const r = circuits.getMessageTimestamp(stateContext.context, index);
+  return (r.result as bigint) ?? null;
 };
 
 export const getL1ToL2Deposit = async (
@@ -380,12 +366,24 @@ export const getL1ToL2Deposit = async (
   contractAddress: ContractAddress,
   queueIndex: bigint,
 ): Promise<BridgeL1ToL2DepositMessage | null> => {
-  const callTx = await getBridgeCallTxInterface(providers, contractAddress);
-  if (!callTx) {
+  const ledgerState = await getBridgeLedger(providers, contractAddress);
+  if (ledgerState != null && 'L1_l1ToL2Deposits' in ledgerState) {
+    const deposits = (ledgerState as { L1_l1ToL2Deposits: { member(k: bigint): boolean; lookup(k: bigint): BridgeL1ToL2DepositMessage } })
+      .L1_l1ToL2Deposits;
+    if (deposits.member(queueIndex)) {
+      return deposits.lookup(queueIndex);
+    }
+  }
+  const stateContext = await getBridgeStateContext(providers, contractAddress);
+  if (!stateContext) {
     return null;
   }
-  const result = await callTx.getL1ToL2Deposit(queueIndex);
-  return result.private.result;
+  const circuits = stateContext.contract.circuits as Record<
+    string,
+    (ctx: unknown, ...args: unknown[]) => { result: unknown; context: unknown }
+  >;
+  const r = circuits.getL1ToL2Deposit?.(stateContext.context, queueIndex);
+  return (r?.result as BridgeL1ToL2DepositMessage) ?? null;
 };
 
 export const bridgeContractInstance: BridgeContract = new Bridge.Contract(witnesses);
@@ -428,39 +426,11 @@ export const deploy = async (
     throw new Error('No verifier keys found for bridge circuits. Check zkConfigPath and artifacts.');
   }
 
-  const initialKeyCount = Math.min(resolveInitialVerifierKeyCount(), verifierKeys.length);
-  const initialVerifierKeys = verifierKeys.slice(0, initialKeyCount);
-  const remainingVerifierKeys = verifierKeys.slice(initialKeyCount);
-  const initialCircuitIds = initialVerifierKeys.map(([circuitId]) => circuitId);
-
-  if (remainingVerifierKeys.length > 0) {
-    logger.info(
-      `Deploying bridge contract with ${initialVerifierKeys.length}/${verifierKeys.length} verifier keys ` +
-        'to avoid block limits. Remaining keys will be inserted after deployment.',
-    );
-  } else {
-    logger.info('Deploying bridge contract with all verifier keys...');
-  }
+  logger.info(`Deploying bridge contract with all (${verifierKeys.length}) verifier keys...`);
 
   const signingKey = sampleSigningKey();
-  class PrunedBridgeContract extends Bridge.Contract<BridgePrivateState> {
-    initialState(
-      constructorContext: Parameters<BridgeContract['initialState']>[0],
-      ...constructorArgsOverride: BridgeConstructorArgs
-    ) {
-      const result = super.initialState(constructorContext, ...constructorArgsOverride);
-      return {
-        ...result,
-        currentContractState: createPrunedContractState(result.currentContractState, initialCircuitIds),
-      };
-    }
-  }
-  const deployCompiledContract = CompiledContract.make<BridgeContract>('Bridge', PrunedBridgeContract).pipe(
-    CompiledContract.withWitnesses(witnesses),
-    CompiledContract.withCompiledFileAssets(contractConfig.zkConfigPath),
-  );
   const deployOptions = {
-    compiledContract: deployCompiledContract,
+    compiledContract: bridgeCompiledContract,
     privateStateId: BridgePrivateStateId,
     initialPrivateState: privateState,
     args: constructorArgs,
@@ -486,14 +456,6 @@ export const deploy = async (
   const contractAddress = unprovenDeployTxData.public.contractAddress;
   logger.info(`Deployed contract at address: ${contractAddress}`);
 
-  if (remainingVerifierKeys.length > 0) {
-    logger.info(`Inserting ${remainingVerifierKeys.length} verifier keys after deployment...`);
-    for (const [index, [circuitId, verifierKey]] of remainingVerifierKeys.entries()) {
-      logger.info(`Inserting verifier key ${index + 1}/${remainingVerifierKeys.length} for ${circuitId}...`);
-      await submitInsertVerifierKeyTx(providers, bridgeCompiledContract, contractAddress, circuitId, verifierKey);
-    }
-  }
-
   const deployTxData = {
     public: {
       ...finalizedTxData,
@@ -513,23 +475,28 @@ export const deploy = async (
 export const displayBridgeState = async (
   providers: BridgeProviders,
   bridgeContract: DeployedBridgeContract,
-): Promise<{ state: BridgeQueryState | null; contractAddress: string }> => {
+): Promise<{ ledger: ReturnType<typeof Bridge.ledger> | null; contractAddress: string }> => {
   const contractAddress = bridgeContract.deployTxData.public.contractAddress;
-  const state = await getBridgeQueryState(providers, contractAddress);
-  if (state === null) {
+  const ledger = await getBridgeLedger(providers, contractAddress);
+  if (ledger === null) {
     logger.info(`There is no contract deployed at ${contractAddress}.`);
   } else {
+    const lastFinalized = ledger.L1_miscData.lastFinalizedBatchIndex;
+    const withdrawRoot = ledger.L1_withdrawRoots.member(lastFinalized)
+      ? ledger.L1_withdrawRoots.lookup(lastFinalized)
+      : ZERO_BYTES_32_BRIDGE;
+    const withdrawMessageCount = ledger.L1_executedL2ToL1Messages.size();
     logger.info({
       section: 'Bridge State',
-      nextCrossDomainMessageIndex: state.nextCrossDomainMessageIndex,
-      nextUnfinalizedQueueIndex: state.nextUnfinalizedQueueIndex,
-      lockedNIGHT: state.lockedNIGHT,
-      feeVault: state.feeVault,
-      withdrawMessageCount: state.withdrawMessageCount,
-      withdrawRoot: toHex(state.withdrawRoot),
+      nextCrossDomainMessageIndex: ledger.L1_nextCrossDomainMessageIndex,
+      nextUnfinalizedQueueIndex: ledger.L1_nextUnfinalizedQueueIndex,
+      lockedNIGHT: ledger.L1_lockedNIGHT,
+      feeVault: ledger.L1_feeVault,
+      withdrawMessageCount,
+      withdrawRoot: toHex(withdrawRoot),
     });
   }
-  return { contractAddress, state };
+  return { contractAddress, ledger };
 };
 
 export const createWalletAndMidnightProvider = async (
@@ -565,7 +532,17 @@ export const createWalletAndMidnightProvider = async (
         },
         { ttl: txTtl },
       );
-      return await finalizeBalancedTransaction(walletContext, recipe, 'balanceTx');
+
+      // Work around wallet SDK bug: signRecipe uses hardcoded 'pre-proof' marker when
+      // cloning intents, but proven (UnboundTransaction) intents have 'proof' data,
+      // causing "Failed to clone intent". Sign manually with the correct proof markers.
+      const signFn = (payload: Uint8Array) => walletContext.unshieldedKeystore.signData(payload);
+      signTransactionIntents(recipe.baseTransaction, signFn, 'proof');
+      if (recipe.balancingTransaction) {
+        signTransactionIntents(recipe.balancingTransaction, signFn, 'pre-proof');
+      }
+
+      return await walletContext.wallet.finalizeRecipe(recipe);
     },
     async submitTx(tx: ledger.FinalizedTransaction): Promise<ledger.TransactionId> {
       try {
@@ -594,15 +571,15 @@ export const waitForFunds = (wallet: WalletFacade) =>
     wallet.state().pipe(
       Rx.throttleTime(10_000),
       Rx.tap((state) => {
-        const unshielded = state.unshielded?.balances[ledger.nativeToken().raw] ?? 0n;
-        const shielded = state.shielded?.balances[ledger.nativeToken().raw] ?? 0n;
+        const unshielded = state.unshielded?.balances[ledger.unshieldedToken().raw] ?? 0n;
+        const shielded = state.shielded?.balances[ledger.unshieldedToken().raw] ?? 0n;
         logger.info(`Waiting for funds. Synced: ${state.isSynced}, Unshielded: ${unshielded}, Shielded: ${shielded}`);
       }),
       Rx.filter((state) => state.isSynced),
       Rx.map(
         (s) =>
-          (s.unshielded?.balances[ledger.nativeToken().raw] ?? 0n) +
-          (s.shielded?.balances[ledger.nativeToken().raw] ?? 0n),
+          (s.unshielded?.balances[ledger.unshieldedToken().raw] ?? 0n) +
+          (s.shielded?.balances[ledger.unshieldedToken().raw] ?? 0n),
       ),
       Rx.filter((balance) => balance > 0n),
     ),
@@ -615,8 +592,8 @@ export const displayWalletBalances = async (
   wallet: WalletFacade,
 ): Promise<{ unshielded: any; shielded: bigint; total: bigint }> => {
   const state = await Rx.firstValueFrom(wallet.state());
-  const unshielded = state.unshielded?.balances[ledger.nativeToken().raw] ?? 0n;
-  const shielded = state.shielded?.balances[ledger.nativeToken().raw] ?? 0n;
+  const unshielded = state.unshielded?.balances[ledger.unshieldedToken().raw] ?? 0n;
+  const shielded = state.shielded?.balances[ledger.unshieldedToken().raw] ?? 0n;
   const total = unshielded + shielded;
 
   logger.info(`Unshielded balance: ${unshielded} tSTAR`);
@@ -734,7 +711,7 @@ const sortUtxosByValueAsc = (utxos: readonly UtxoWithMeta[]): UtxoWithMeta[] =>
   });
 
 const getNightUtxos = (state: FacadeState): UtxoWithMeta[] =>
-  (state.unshielded?.availableCoins ?? []).filter((coin) => coin.utxo.type === ledger.nativeToken().raw);
+  (state.unshielded?.availableCoins ?? []).filter((coin) => coin.utxo.type === ledger.unshieldedToken().raw);
 
 const getSpendableNightUtxos = (state: FacadeState): UtxoWithMeta[] =>
   getNightUtxos(state).filter((coin) => !isRegisteredForDustGeneration(coin));
@@ -875,9 +852,12 @@ export const initWalletWithSeed = async (seed: Buffer, config: Config): Promise<
   const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(derivationResult.keys[Roles.Zswap]);
   const dustSecretKey = ledger.DustSecretKey.fromSeed(derivationResult.keys[Roles.Dust]);
 
-  const unshieldedKeystore = createKeystore(derivationResult.keys[Roles.NightExternal], config.networkId as any);
+  const unshieldedKeystore = createKeystore(derivationResult.keys[Roles.NightExternal], config.networkId);
 
-  const walletConfiguration: any = {
+  type ShieldedConfig = Parameters<typeof ShieldedWallet>[0];
+  type DustConfig = Parameters<typeof DustWallet>[0];
+  type UnshieldedConfig = Parameters<typeof UnshieldedWallet>[0];
+  const baseConfig = {
     networkId: config.networkId,
     costParameters: {
       additionalFeeOverhead: 300_000_000_000_000n, // 300 trillion - matches SDK examples
@@ -892,15 +872,15 @@ export const initWalletWithSeed = async (seed: Buffer, config: Config): Promise<
     indexerUrl: config.indexerWS,
   };
 
-  const shieldedWallet = ShieldedWallet(walletConfiguration).startWithSecretKeys(shieldedSecretKeys);
-  const dustWallet = DustWallet(walletConfiguration).startWithSecretKey(
+  const shieldedWallet = ShieldedWallet(baseConfig as ShieldedConfig).startWithSecretKeys(shieldedSecretKeys);
+  const dustWallet = DustWallet(baseConfig as DustConfig).startWithSecretKey(
     dustSecretKey,
     ledger.LedgerParameters.initialParameters().dust,
   );
   const unshieldedWallet = UnshieldedWallet({
-    ...walletConfiguration,
+    ...baseConfig,
     txHistoryStorage: new InMemoryTransactionHistoryStorage(),
-  }).startWithPublicKey(UnshieldedPublicKey.fromKeyStore(unshieldedKeystore));
+  } as UnshieldedConfig).startWithPublicKey(UnshieldedPublicKey.fromKeyStore(unshieldedKeystore));
 
   const facade: WalletFacade = new WalletFacade(shieldedWallet, unshieldedWallet, dustWallet);
   await facade.start(shieldedSecretKeys, dustSecretKey);
@@ -990,7 +970,7 @@ export const configureProviders = async (walletContext: WalletContext, config: C
   const zkConfigProvider = new NodeZkConfigProvider<BridgeCircuits>(contractConfig.zkConfigPath);
   const baseProofProvider = createProofProviderWithTimeout(config.proofServer, zkConfigProvider, config.proofTimeoutMs);
   return {
-    privateStateProvider: levelPrivateStateProvider<typeof BridgePrivateStateId>({
+    privateStateProvider: levelPrivateStateProvider<typeof BridgePrivateStateId, BridgePrivateState>({
       privateStateStoreName: contractConfig.privateStateStoreName,
       walletProvider: walletAndMidnightProvider,
     }),

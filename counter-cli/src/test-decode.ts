@@ -85,33 +85,15 @@ async function main() {
   }
 
   const contract = new Bridge.Contract<BridgePrivateState>(witnesses);
-  let circuitContext = createCircuitContext<BridgePrivateState>(
-    contractAddress,
-    ZERO_COIN_PUBLIC_KEY,
-    contractState,
-    defaultPrivateState,
-  );
+  const ledger = Bridge.ledger(contractState.data);
+  const lastFinalizedBatchIndex = ledger.L1_miscData.lastFinalizedBatchIndex;
+  const lastCommittedBatchIndex = ledger.L1_miscData.lastCommittedBatchIndex;
+  const nextIndex = ledger.L1_nextCrossDomainMessageIndex;
 
-  const deposits = new Map<bigint, L1ToL2DepositMessage>();
-
-  const lastFinalizedCall = contract.circuits.lastFinalizedBatchIndex(circuitContext);
-  circuitContext = lastFinalizedCall.context as typeof circuitContext;
-  const lastFinalizedBatchIndex = lastFinalizedCall.result;
-
-  const lastCommittedCall = contract.circuits.lastCommittedBatchIndex(circuitContext);
-  circuitContext = lastCommittedCall.context as typeof circuitContext;
-  const lastCommittedBatchIndex = lastCommittedCall.result;
-
-  const nextIndexCall = contract.circuits.getNextCrossDomainMessageIndex(circuitContext);
-  circuitContext = nextIndexCall.context as typeof circuitContext;
-  const nextIndex = nextIndexCall.result;
   let rollingHashAtNextIndex: Uint8Array | undefined;
-  try {
-    const rollingHashCall = contract.circuits.getMessageRollingHash(circuitContext, nextIndex - 1n);
-    circuitContext = rollingHashCall.context as typeof circuitContext;
-    rollingHashAtNextIndex = rollingHashCall.result;
-  } catch (error) {
-    console.warn('Unable to fetch message rolling hash at index', nextIndex.toString(), ':', error);
+  const rollingHashIndex = nextIndex > 0n ? nextIndex - 1n : 0n;
+  if (ledger.L1_messageRollingHashes.member(rollingHashIndex)) {
+    rollingHashAtNextIndex = ledger.L1_messageRollingHashes.lookup(rollingHashIndex);
   }
   console.log('Next cross-domain message index:', nextIndex.toString());
   if (rollingHashAtNextIndex) {
@@ -120,21 +102,17 @@ async function main() {
   console.log('Last committed batch index:', lastCommittedBatchIndex.toString());
   console.log('Last finalized batch index:', lastFinalizedBatchIndex.toString());
 
+  const deposits = new Map<bigint, L1ToL2DepositMessage>();
   const fetchAndCache = (queueIndex: bigint): L1ToL2DepositMessage | undefined => {
     if (deposits.has(queueIndex)) {
       return deposits.get(queueIndex);
     }
-    try {
-      const call = contract.circuits.getL1ToL2Deposit(circuitContext, queueIndex);
-      circuitContext = call.context as typeof circuitContext;
-      deposits.set(queueIndex, call.result);
-      return call.result;
-    } catch (error) {
-      if (isUnknownQueueIndex(error)) {
-        return undefined;
-      }
-      throw error;
+    if (!ledger.L1_l1ToL2Deposits.member(queueIndex)) {
+      return undefined;
     }
+    const deposit = ledger.L1_l1ToL2Deposits.lookup(queueIndex);
+    deposits.set(queueIndex, deposit);
+    return deposit;
   };
 
   console.log('---');
@@ -162,11 +140,6 @@ async function main() {
   });
 }
 
-function isUnknownQueueIndex(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('UNKNOWN_QUEUE_INDEX');
-}
-
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
 }
@@ -181,14 +154,6 @@ function formatDeposit(deposit: L1ToL2DepositMessage) {
     dataHash: toHex(deposit.dataHash),
   };
 }
-
-type RollupSnapshot = {
-  contractState: ContractState;
-  lastCommittedBatchIndex: bigint;
-  lastFinalizedBatchIndex: bigint;
-  nextCrossDomainMessageIndex: bigint;
-  nextUnfinalizedQueueIndex: bigint;
-};
 
 type SubmitBatchParams = {
   contract: Bridge.Contract<BridgePrivateState>;
@@ -206,7 +171,7 @@ type BatchDataParams = {
   contract: Bridge.Contract<BridgePrivateState>;
   contractAddress: string;
   contractState: ContractState;
-  snapshot: RollupSnapshot;
+  ledger: Bridge.Ledger;
   batchHash: Uint8Array;
 };
 
@@ -262,22 +227,22 @@ async function submitDummyBatch(params: SubmitBatchParams): Promise<void> {
     }
     const bridgeContract = await api.joinContract(providers, params.contractAddress);
     await ensureDefaultVerifierSet(bridgeContract);
-    const { snapshot: pendingSnapshot, batchHash } = await ensurePendingBatch({
+    const { contractState: pendingContractState, ledger: pendingLedger, batchHash } = await ensurePendingBatch({
       ...params,
       bridgeContract,
       publicDataProvider: poller,
     });
 
-    const targetBatchIndex = pendingSnapshot.lastFinalizedBatchIndex + 1n;
-    if (pendingSnapshot.lastCommittedBatchIndex < targetBatchIndex) {
+    const targetBatchIndex = pendingLedger.L1_miscData.lastFinalizedBatchIndex + 1n;
+    if (pendingLedger.L1_miscData.lastCommittedBatchIndex < targetBatchIndex) {
       throw new Error('No committed batch available to finalize.');
     }
 
     const batchData = await buildBatchPublicData({
       contract: params.contract,
       contractAddress: params.contractAddress,
-      contractState: pendingSnapshot.contractState,
-      snapshot: pendingSnapshot,
+      contractState: pendingContractState,
+      ledger: pendingLedger,
       batchHash,
     });
 
@@ -297,7 +262,7 @@ async function submitDummyBatch(params: SubmitBatchParams): Promise<void> {
       const dryRunContext = createCircuitContext(
         params.contractAddress,
         ZERO_COIN_PUBLIC_KEY,
-        pendingSnapshot.contractState,
+        pendingContractState,
         defaultPrivateState,
       );
       params.contract.circuits.finalizeBatch(dryRunContext, batchData, signatures, DEFAULT_SIGNER_BITMAP, 0n);
@@ -312,12 +277,12 @@ async function submitDummyBatch(params: SubmitBatchParams): Promise<void> {
       poller,
       params.contract,
       params.contractAddress,
-      (snapshot) => snapshot.lastFinalizedBatchIndex >= targetBatchIndex,
+      (ledger) => ledger.L1_miscData.lastFinalizedBatchIndex >= targetBatchIndex,
       'lastFinalizedBatchIndex',
     );
 
-    const finalSnapshot = await fetchSnapshot(poller, params.contract, params.contractAddress);
-    console.log('Dummy batch finalized at index:', finalSnapshot.lastFinalizedBatchIndex.toString());
+    const { ledger: finalLedger } = await getContractStateAndLedger(poller, params.contractAddress);
+    console.log('Dummy batch finalized at index:', finalLedger.L1_miscData.lastFinalizedBatchIndex.toString());
   } finally {
     if (walletContext) {
       await api.closeWallet(walletContext);
@@ -325,67 +290,76 @@ async function submitDummyBatch(params: SubmitBatchParams): Promise<void> {
   }
 }
 
+async function getContractStateAndLedger(
+  publicDataProvider: PublicDataProvider,
+  contractAddress: string,
+): Promise<{ contractState: ContractState; ledger: Bridge.Ledger }> {
+  const contractState = await publicDataProvider.queryContractState(contractAddress);
+  if (!contractState) {
+    throw new Error('No state found for contract');
+  }
+  return { contractState, ledger: Bridge.ledger(contractState.data) };
+}
+
 async function ensurePendingBatch(
   params: EnsureBatchParams,
-): Promise<{ snapshot: RollupSnapshot; batchHash: Uint8Array }> {
-  const initialSnapshot = await fetchSnapshot(params.publicDataProvider, params.contract, params.contractAddress);
-  const hasPending = initialSnapshot.lastCommittedBatchIndex > initialSnapshot.lastFinalizedBatchIndex;
-  const targetBatchIndex = initialSnapshot.lastFinalizedBatchIndex + 1n;
+): Promise<{ contractState: ContractState; ledger: Bridge.Ledger; batchHash: Uint8Array }> {
+  const { contractState: initialContractState, ledger: initialLedger } = await getContractStateAndLedger(
+    params.publicDataProvider,
+    params.contractAddress,
+  );
+  const hasPending = initialLedger.L1_miscData.lastCommittedBatchIndex > initialLedger.L1_miscData.lastFinalizedBatchIndex;
+  const targetBatchIndex = initialLedger.L1_miscData.lastFinalizedBatchIndex + 1n;
 
   if (hasPending) {
     const existingHash = await readCommittedBatch(
       params.contract,
       params.contractAddress,
-      initialSnapshot.contractState,
+      initialContractState,
       targetBatchIndex,
     );
     console.log('Found existing unfinalized batch. Reusing batch hash:', toHex(existingHash));
-    return { snapshot: initialSnapshot, batchHash: existingHash };
+    return { contractState: initialContractState, ledger: initialLedger, batchHash: existingHash };
   }
 
   const parentHash = await readCommittedBatch(
     params.contract,
     params.contractAddress,
-    initialSnapshot.contractState,
-    initialSnapshot.lastCommittedBatchIndex,
+    initialContractState,
+    initialLedger.L1_miscData.lastCommittedBatchIndex,
   );
   const newBatchHash = randomBytes32();
   const commitTx = await params.bridgeContract.callTx.commitBatch(parentHash, newBatchHash);
   console.log('commitBatch txHash:', commitTx.public.txHash);
   console.log('Dummy batch hash:', toHex(newBatchHash));
 
-  const updatedSnapshot = await waitForBatchIndexUpdate(
+  const updated = await waitForBatchIndexUpdate(
     params.publicDataProvider,
     params.contract,
     params.contractAddress,
-    (snapshot) => snapshot.lastCommittedBatchIndex >= targetBatchIndex,
+    (ledger) => ledger.L1_miscData.lastCommittedBatchIndex >= targetBatchIndex,
     'lastCommittedBatchIndex',
   );
 
-  return { snapshot: updatedSnapshot, batchHash: newBatchHash };
+  return { contractState: updated.contractState, ledger: updated.ledger, batchHash: newBatchHash };
 }
 
 async function buildBatchPublicData(params: BatchDataParams): Promise<L1_BatchPublicDataV1Full> {
-  const batchIndex = params.snapshot.lastFinalizedBatchIndex + 1n;
-  const prevBatchIndex = params.snapshot.lastFinalizedBatchIndex;
-  let context = createCircuitContext(
-    params.contractAddress,
-    ZERO_COIN_PUBLIC_KEY,
-    params.contractState,
-    defaultPrivateState,
-  );
-
-  const prevBatchCall = params.contract.circuits.getCommittedBatch(context, prevBatchIndex);
-  context = prevBatchCall.context as typeof context;
-  const prevBatchHash = prevBatchCall.result;
-
-  const prevStateCall = params.contract.circuits.getFinalizedStateRoot(context, prevBatchIndex);
-  context = prevStateCall.context as typeof context;
-  const prevStateRoot = prevStateCall.result;
-
-  const lastProcessedQueueIndex = computeLastProcessedQueueIndex(params.snapshot);
-  const queueHashCall = params.contract.circuits.getMessageRollingHash(context, lastProcessedQueueIndex);
-  const messageQueueHash = queueHashCall.result;
+  const prevBatchIndex = params.ledger.L1_miscData.lastFinalizedBatchIndex;
+  const batchIndex = prevBatchIndex + 1n;
+  const ledgerState = params.ledger;
+  if (!ledgerState.L1_committedBatches.member(prevBatchIndex)) {
+    throw new Error(`Committed batch not found for index ${prevBatchIndex}`);
+  }
+  if (!ledgerState.L1_finalizedStateRoots.member(prevBatchIndex)) {
+    throw new Error(`Finalized state root not found for index ${prevBatchIndex}`);
+  }
+  const prevBatchHash = ledgerState.L1_committedBatches.lookup(prevBatchIndex);
+  const prevStateRoot = ledgerState.L1_finalizedStateRoots.lookup(prevBatchIndex);
+  const lastProcessedQueueIndex = computeLastProcessedQueueIndex(params.ledger);
+  const messageQueueHash = ledgerState.L1_messageRollingHashes.member(lastProcessedQueueIndex)
+    ? ledgerState.L1_messageRollingHashes.lookup(lastProcessedQueueIndex)
+    : zeroBytes32();
 
   return {
     version: 1n,
@@ -405,65 +379,31 @@ async function buildBatchPublicData(params: BatchDataParams): Promise<L1_BatchPu
   } satisfies L1_BatchPublicDataV1Full;
 }
 
-function computeLastProcessedQueueIndex(snapshot: RollupSnapshot): bigint {
-  if (snapshot.nextCrossDomainMessageIndex === 0n) {
+function computeLastProcessedQueueIndex(ledger: Bridge.Ledger): bigint {
+  if (ledger.L1_nextCrossDomainMessageIndex === 0n) {
     return 0n;
   }
-  const candidate = snapshot.nextCrossDomainMessageIndex - 1n;
-  if (snapshot.nextUnfinalizedQueueIndex === 0n) {
+  const candidate = ledger.L1_nextCrossDomainMessageIndex - 1n;
+  if (ledger.L1_nextUnfinalizedQueueIndex === 0n) {
     return candidate;
   }
-  const minimum = snapshot.nextUnfinalizedQueueIndex - 1n;
+  const minimum = ledger.L1_nextUnfinalizedQueueIndex - 1n;
   return candidate > minimum ? candidate : minimum;
-}
-
-async function fetchSnapshot(
-  publicDataProvider: PublicDataProvider,
-  contract: Bridge.Contract<BridgePrivateState>,
-  contractAddress: string,
-): Promise<RollupSnapshot> {
-  const contractState = await publicDataProvider.queryContractState(contractAddress);
-  if (!contractState) {
-    throw new Error('No state found for contract');
-  }
-  let context = createCircuitContext(contractAddress, ZERO_COIN_PUBLIC_KEY, contractState, defaultPrivateState);
-
-  const lastCommittedCall = contract.circuits.lastCommittedBatchIndex(context);
-  context = lastCommittedCall.context as typeof context;
-  const lastCommittedBatchIndex = lastCommittedCall.result;
-
-  const lastFinalizedCall = contract.circuits.lastFinalizedBatchIndex(context);
-  context = lastFinalizedCall.context as typeof context;
-  const lastFinalizedBatchIndex = lastFinalizedCall.result;
-
-  const nextIndexCall = contract.circuits.getNextCrossDomainMessageIndex(context);
-  context = nextIndexCall.context as typeof context;
-  const nextCrossDomainMessageIndex = nextIndexCall.result;
-
-  const nextUnfinalizedCall = contract.circuits.getNextUnfinalizedQueueIndex(context);
-
-  return {
-    contractState,
-    lastCommittedBatchIndex,
-    lastFinalizedBatchIndex,
-    nextCrossDomainMessageIndex,
-    nextUnfinalizedQueueIndex: nextUnfinalizedCall.result,
-  };
 }
 
 async function waitForBatchIndexUpdate(
   publicDataProvider: PublicDataProvider,
-  contract: Bridge.Contract<BridgePrivateState>,
+  _contract: Bridge.Contract<BridgePrivateState>,
   contractAddress: string,
-  predicate: (snapshot: RollupSnapshot) => boolean,
+  predicate: (ledger: Bridge.Ledger) => boolean,
   label: string,
   attempts = 20,
   delayMs = 3_000,
-): Promise<RollupSnapshot> {
+): Promise<{ contractState: ContractState; ledger: Bridge.Ledger }> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const snapshot = await fetchSnapshot(publicDataProvider, contract, contractAddress);
-    if (predicate(snapshot)) {
-      return snapshot;
+    const { contractState, ledger } = await getContractStateAndLedger(publicDataProvider, contractAddress);
+    if (predicate(ledger)) {
+      return { contractState, ledger };
     }
     await delay(delayMs);
   }
@@ -473,13 +413,16 @@ async function waitForBatchIndexUpdate(
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function readCommittedBatch(
-  contract: Bridge.Contract<BridgePrivateState>,
-  contractAddress: string,
+  _contract: Bridge.Contract<BridgePrivateState>,
+  _contractAddress: string,
   contractState: ContractState,
   index: bigint,
 ): Promise<Uint8Array> {
-  const context = createCircuitContext(contractAddress, ZERO_COIN_PUBLIC_KEY, contractState, defaultPrivateState);
-  return contract.circuits.getCommittedBatch(context, index).result;
+  const ledger = Bridge.ledger(contractState.data);
+  if (!ledger.L1_committedBatches.member(index)) {
+    throw new Error(`Committed batch not found for index ${index}`);
+  }
+  return ledger.L1_committedBatches.lookup(index);
 }
 
 function randomBytes32(): Uint8Array {
