@@ -2,11 +2,11 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import * as pino from "pino";
 import { MainLayout } from "./layouts/layout";
 import { Home } from "./pages/home/";
-import { Counter } from "./pages/counter";
+import { Bridge } from "./pages/bridge";
 import { WalletUI } from "./pages/wallet-ui";
 import { ThemeProvider } from "./components/theme-provider";
 import { MidnightMeshProvider } from "./modules/midnight/wallet-widget/contexts/wallet";
-import { CounterAppProvider } from "./modules/midnight/counter-sdk/contexts";
+import { BridgeAppProvider } from "./modules/midnight/bridge-sdk/contexts";
 
 export const logger = pino.pino({
   level: "trace",
@@ -19,17 +19,17 @@ function App() {
   return (
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <MidnightMeshProvider logger={logger}>
-        <CounterAppProvider logger={logger} contractAddress={contractAddress}>
+        <BridgeAppProvider logger={logger} contractAddress={contractAddress}>
           <BrowserRouter basename="/">
             <Routes>
               <Route element={<MainLayout />}>
                 <Route path="/" element={<Home />} />
                 <Route path="/wallet-ui" element={<WalletUI />} />
-                <Route path="/counter" element={<Counter />} />
+                <Route path="/bridge" element={<Bridge />} />
               </Route>
             </Routes>
           </BrowserRouter>
-        </CounterAppProvider>
+        </BridgeAppProvider>
       </MidnightMeshProvider>
     </ThemeProvider>
   );

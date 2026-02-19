@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "counter-cli",
-    "counter-contract",
+    "bridge-cli",
+    "bridge-contract",
     "bulletin-board",
     "bulletin-board-cli",
     "frontend-vite-react"
@@ -13,9 +13,9 @@
   "scripts": {
     "compact": "turbo run compact",
     "build": "turbo run build",
-    "build-production": "cd counter-contract && npm run build && cd ../frontend-vite-react && npm run build",
-    "setup-standalone": "cd counter-cli && npm run setup-undeployed",
-    "deploy-undeployed": "cd counter-cli && npm run deploy-undeployed",
+    "build-production": "cd bridge-contract && npm run build && cd ../frontend-vite-react && npm run build",
+    "setup-standalone": "cd bridge-cli && npm run setup-undeployed",
+    "deploy-undeployed": "cd bridge-cli && npm run deploy-undeployed",
     "dev:frontend": "cd frontend-vite-react && npm run dev",
     "lint": "turbo run lint"
   },

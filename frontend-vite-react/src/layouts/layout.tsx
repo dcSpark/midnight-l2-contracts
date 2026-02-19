@@ -15,7 +15,7 @@ export const MainLayout = () => {
             Home
           </NavLink>
           <NavLink
-            to="/counter"
+            to="/bridge"
             className={({ isActive }) =>
               `font-semibold transition hover:opacity-80 ${isActive ? 'underline' : ''}`
             }

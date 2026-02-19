@@ -54,8 +54,8 @@ compact check  # Should show latest version
 ## 📁 Project Structure
 
 ```
-├── counter-cli/         # CLI tools
-├── counter-contract/    # Smart contracts
+├── bridge-cli/         # CLI tools
+├── bridge-contract/    # Smart contracts
 └── frontend-vite-react/ # React application
 ```
 
@@ -83,8 +83,8 @@ git submodule update --init
 
 ### Setup Env variables
 
-1. **Create .env file from template under counter-cli folder**
-   - [`counter-cli/.env_template`](./counter-cli/.env_template)
+1. **Create .env file from template under bridge-cli folder**
+   - [`bridge-cli/.env_template`](./bridge-cli/.env_template)
 
 2. **Create .env file from template under frontend-vite-react folder**
    - [`frontend-vite-react/.env_template`](./frontend-vite-react/.env_template)
