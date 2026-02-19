@@ -23,7 +23,7 @@
     "tui-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/tui_standalone.ts",
     "tui-preview": "npx --yes tsx --tsconfig tsconfig.json src/tui_preview.ts",
     "setup-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/setup/standalone.ts",
-    "deploy-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/deploy-undeployed.ts",
+    "deploy-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/cli.ts deploy -n undeployed",
     "ps-undeployed": "docker compose -f ps-undeployed.yml up",
     "ps-preview": "docker compose -f ps-preview.yml up",
     "build": "rm -rf dist && tsc --project tsconfig.build.json",

@@ -21,14 +21,21 @@ export interface CliConfig {
   networkLabel: string;
 }
 
-export function resolveCliConfig(opts?: {
-  contract?: string;
+/** Config for deploy command (no contract address). */
+export interface DeployCliConfig {
+  config: Config;
+  networkLabel: string;
+}
+
+export type ConfigResolveOpts = {
   indexer?: string;
   indexerWS?: string;
   node?: string;
   proofServer?: string;
   network?: string;
-}): CliConfig {
+};
+
+function resolveNetworkAndConfig(opts?: ConfigResolveOpts): { config: Config; networkLabel: string } {
   const envPreference = (
     opts?.network ??
     process.env.MIDNIGHT_NETWORK ??
@@ -58,6 +65,27 @@ export function resolveCliConfig(opts?: {
     }
   }
 
+  const c = config as Config & { indexer: string; indexerWS: string; node: string; proofServer: string };
+  if (opts?.indexer) c.indexer = opts.indexer;
+  else if (process.env.INDEXER_HTTP) c.indexer = process.env.INDEXER_HTTP;
+  if (opts?.indexerWS) c.indexerWS = opts.indexerWS;
+  else if (process.env.INDEXER_WS) c.indexerWS = process.env.INDEXER_WS;
+  if (opts?.node) c.node = opts.node;
+  else if (process.env.MIDNIGHT_NODE_WS) c.node = process.env.MIDNIGHT_NODE_WS;
+  else if (process.env.NODE_WS) c.node = process.env.NODE_WS;
+  if (opts?.proofServer) c.proofServer = opts.proofServer;
+  else if (process.env.PROOF_SERVER) c.proofServer = process.env.PROOF_SERVER;
+
+  return { config, networkLabel };
+}
+
+export function resolveDeployConfig(opts?: ConfigResolveOpts): DeployCliConfig {
+  return resolveNetworkAndConfig(opts);
+}
+
+export function resolveCliConfig(opts?: ConfigResolveOpts & { contract?: string }): CliConfig {
+  const { config, networkLabel } = resolveNetworkAndConfig(opts);
+
   const contractAddress =
     opts?.contract ??
     process.env.BRIDGE_CONTRACT_ADDRESS ??
@@ -69,17 +97,6 @@ export function resolveCliConfig(opts?: {
     );
   }
   assertIsContractAddress(contractAddress);
-
-  const c = config as Config & { indexer: string; indexerWS: string; node: string; proofServer: string };
-  if (opts?.indexer) c.indexer = opts.indexer;
-  else if (process.env.INDEXER_HTTP) c.indexer = process.env.INDEXER_HTTP;
-  if (opts?.indexerWS) c.indexerWS = opts.indexerWS;
-  else if (process.env.INDEXER_WS) c.indexerWS = process.env.INDEXER_WS;
-  if (opts?.node) c.node = opts.node;
-  else if (process.env.MIDNIGHT_NODE_WS) c.node = process.env.MIDNIGHT_NODE_WS;
-  else if (process.env.NODE_WS) c.node = process.env.NODE_WS;
-  if (opts?.proofServer) c.proofServer = opts.proofServer;
-  else if (process.env.PROOF_SERVER) c.proofServer = process.env.PROOF_SERVER;
 
   return { config, contractAddress, networkLabel };
 }

@@ -1,4 +1,5 @@
 export { runState } from './state.js';
+export { runDeploy, type DeployOptions } from './deploy.js';
 export { runCommitBatch, type CommitBatchOptions } from './commit-batch.js';
 export {
   runFinalizeBatch,

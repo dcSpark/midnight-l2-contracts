@@ -6,8 +6,10 @@ import 'dotenv/config';
 import { Command } from 'commander';
 import { WebSocket } from 'ws';
 import { resolveCliConfig } from './cli-config.js';
+import { resolveDeployConfig } from './cli-config.js';
 import {
   runState,
+  runDeploy,
   runCommitBatch,
   runFinalizeBatch,
   runFinalizeBatchFromLedger,
@@ -36,6 +38,27 @@ async function main(): Promise<void> {
     .option('--proof-server <url>', 'Proof server URL (or PROOF_SERVER)')
     .option('-n, --network <name>', 'Network: preview | undeployed (or MIDNIGHT_NETWORK)')
     .option('--json', 'Output JSON');
+
+  program
+    .command('deploy')
+    .description(
+      'Deploy the Bridge contract. Network via -n/--network (or MIDNIGHT_NETWORK). Wallet: --deployer-seed <hex> or FUNDING_SEED / MY_PREVIEW_MNEMONIC.',
+    )
+    .option('--deployer-seed <hex>', 'Deployer wallet hex seed (32 bytes, 64 hex chars). Overrides env.')
+    .action(async (subOpts: { deployerSeed?: string }) => {
+      const opts = program.opts();
+      const deployConfig = resolveDeployConfig({
+        indexer: opts.indexer,
+        indexerWS: opts.indexerWs,
+        node: opts.node,
+        proofServer: opts.proofServer,
+        network: opts.network,
+      });
+      await runDeploy(deployConfig, {
+        deployerSeed: subOpts.deployerSeed,
+        json: opts.json,
+      });
+    });
 
   program
     .command('state')

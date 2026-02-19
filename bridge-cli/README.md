@@ -73,6 +73,7 @@ Run with `npm run cli -- <command>` or `npx tsx src/cli.ts <command>`:
 
 | Command | Description |
 |---------|-------------|
+| `deploy` | Deploy the Bridge contract. Network via `-n`/`--network` or `MIDNIGHT_NETWORK`. Wallet: `--deployer-seed <hex>` or `FUNDING_SEED` / `MY_PREVIEW_MNEMONIC`. |
 | `state` | Read and print Bridge state (ledger summary, L1→L2 deposits). No wallet required. |
 | `commit-batch` | Commit a batch (rollup node). Requires `--parent-hash` and `--batch-hash`. Requires wallet. |
 | `finalize-batch` | Finalize a batch. Requires the four `finalizeBatch` arguments as CLI args (see below). |
@@ -89,12 +90,18 @@ Run with `npm run cli -- <command>` or `npx tsx src/cli.ts <command>`:
 - `MIDNIGHT_NETWORK` – `preview` or `undeployed` (default: preview).
 - `FUNDING_SEED` or `MY_PREVIEW_MNEMONIC` – Wallet seed (hex) or mnemonic for signing commands.
 - `SIGNATURE_MAX_NONCE` – Max nonce for finalize-batch signature generation (optional).
+- `MY_UNDEPLOYED_UNSHIELDED_ADDRESS` – Optional. Bech32m unshielded address for standalone setup (`npm run setup-standalone`). If set, the script sends a test transfer to that address; if unset, the transfer is skipped.
 
 Add `--json` for machine-readable output (e.g. `{ "txHash": "...", "status": "submitted" }`).
 
 ## Examples
 
 ```bash
+# Deploy Bridge (undeployed/local or preview)
+npm run cli -- deploy -n undeployed
+# Or with explicit deployer seed and JSON output
+npm run cli -- deploy -n undeployed --deployer-seed <64_hex> --json
+
 # State (no wallet)
 BRIDGE_CONTRACT_ADDRESS=<hex> npm run cli -- state
 
