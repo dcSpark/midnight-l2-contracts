@@ -30,7 +30,7 @@ So: **Rust owns orchestration and ledger logic; bridge-cli owns transaction cons
 ### Repo layout
 
 - **`src/cli.ts`** – Entrypoint. Commander-based CLI; defines commands and global options.
-- **`src/commands/`** – One module per command: `state`, `commit-batch`, `finalize-batch`, `finalize-batch-from-ledger`, `set-verifier-set`, `claim-l1-withdrawal-unshielded`.
+- **`src/commands/`** – One module per command: `state`, `deposit`, `commit-batch`, `finalize-batch`, `finalize-batch-from-ledger`, `set-verifier-set`, `claim-l1-withdrawal-unshielded`.
 - **`src/batch-helpers.ts`** – Shared batch/signature logic: ledger helpers, `buildBatchPublicData`, `buildSignatureVector`, JSON parse/serialize for `BatchPublicDataV1Full` and `Signature[]`, hashing.
 - **`src/api.ts`** – Wallet build, provider config, `joinContract`, contract call helpers; used by all commands that submit transactions.
 - **`src/cli-config.ts`** – Resolves config and contract address from env and optional CLI overrides.
@@ -75,6 +75,7 @@ Run with `npm run cli -- <command>` or `npx tsx src/cli.ts <command>`:
 |---------|-------------|
 | `deploy` | Deploy the Bridge contract. Network via `-n`/`--network` or `MIDNIGHT_NETWORK`. Wallet: `--deployer-seed <hex>` or `FUNDING_SEED` / `MY_PREVIEW_MNEMONIC`. |
 | `state` | Read and print Bridge state (ledger summary, L1→L2 deposits). No wallet required. |
+| `deposit` | Deposit unshielded NIGHT to L2 (call `depositNIGHTUnshielded`). Requires `--amount`. Optional `--l2-recipient` (64 hex), `--gas-limit`, `--timestamp`. Requires wallet. |
 | `commit-batch` | Commit a batch (rollup node). Requires `--parent-hash` and `--batch-hash`. Requires wallet. |
 | `finalize-batch` | Finalize a batch. Requires the four `finalizeBatch` arguments as CLI args (see below). |
 | `finalize-batch-from-ledger` | Build those four args from ledger (ensurePendingBatch, buildBatchPublicData, sign) and submit. Test/blueprint command. |
@@ -104,6 +105,11 @@ npm run cli -- deploy -n undeployed --deployer-seed <64_hex> --json
 
 # State (no wallet)
 BRIDGE_CONTRACT_ADDRESS=<hex> npm run cli -- state
+
+# Deposit unshielded NIGHT to L2 (default: recipient = wallet's coin public key)
+npm run cli -- deposit --amount 1000
+# With explicit L2 recipient (64 hex) and optional gas limit / timestamp
+npm run cli -- deposit --amount 1000 --l2-recipient <64_hex> --gas-limit 100000 --timestamp 0
 
 # Commit a batch (rollup node; parent and batch hash required)
 npm run cli -- commit-batch --parent-hash <64_hex> --batch-hash <64_hex>

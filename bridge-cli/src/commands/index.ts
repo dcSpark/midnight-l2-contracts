@@ -12,3 +12,4 @@ export {
   runClaimL1WithdrawalUnshielded,
   type ClaimL1WithdrawalUnshieldedOptions,
 } from './claim-l1-withdrawal-unshielded.js';
+export { runDeposit, type DepositOptions } from './deposit.js';

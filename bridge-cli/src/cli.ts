@@ -15,6 +15,7 @@ import {
   runFinalizeBatchFromLedger,
   runSetVerifierSet,
   runClaimL1WithdrawalUnshielded,
+  runDeposit,
 } from './commands/index.js';
 import {
   parseBatchPublicDataFromJson,
@@ -200,6 +201,36 @@ async function main(): Promise<void> {
         json: opts.json,
       });
     });
+
+  program
+    .command('deposit')
+    .description(
+      'Deposit unshielded NIGHT to L2 (call depositNIGHTUnshielded). Requires wallet. Optional --l2-recipient (64 hex); default is wallet\'s coin public key.',
+    )
+    .requiredOption('--amount <amount>', 'Amount in NIGHT (decimal string)')
+    .option('--l2-recipient <hex>', 'L2 recipient (32 bytes, 64 hex chars). Default: wallet\'s coin public key')
+    .option('--gas-limit <n>', 'Gas limit for L2 (decimal). Default: 100000', '100000')
+    .option('--timestamp <n>', 'Deposit message timestamp (decimal). Default: 0', '0')
+    .action(
+      async (subOpts: { amount: string; l2Recipient?: string; gasLimit: string; timestamp: string }) => {
+        const opts = program.opts();
+        const cliConfig = resolveCliConfig({
+          contract: opts.contract,
+          indexer: opts.indexer,
+          indexerWS: opts.indexerWs,
+          node: opts.node,
+          proofServer: opts.proofServer,
+          network: opts.network,
+        });
+        await runDeposit(cliConfig, {
+          amount: subOpts.amount,
+          l2Recipient: subOpts.l2Recipient,
+          gasLimit: subOpts.gasLimit,
+          timestamp: subOpts.timestamp,
+          json: opts.json,
+        });
+      },
+    );
 
   await program.parseAsync(process.argv);
 
