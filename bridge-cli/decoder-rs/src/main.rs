@@ -21,7 +21,6 @@ mod bridge_batch;
 mod bridge_cli_subprocess;
 mod bridge_signatures;
 mod bridge_tx;
-mod zkir_pis;
 
 const DEFAULT_INDEXER_HTTP: &str = "http://127.0.0.1:8088/api/v3/graphql";
 const DEFAULT_CONTRACT_ADDRESS: &str =
@@ -114,6 +113,10 @@ struct BatchArgs {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env from current dir or parent (bridge-cli) so BRIDGE_CONTRACT_ADDRESS etc. are set
+    dotenvy::dotenv().ok();
+    dotenvy::from_path("../.env").ok();
+
     let cli = Cli::parse();
 
     match cli.command {

@@ -11,11 +11,6 @@ use midnight_node_ledger_helpers::transient_crypto::hash::{
 
 use crate::bridge_abi::{CurvePoint, Signature};
 
-pub fn derive_pk(secret_key: Fr) -> CurvePoint {
-    let generator = EmbeddedGroupAffine::generator();
-    curve_point_from_affine(generator * secret_key)
-}
-
 pub fn sign_bytes32(message: [u8; 32], secret_key: Fr, nonce: Fr) -> Signature {
     let generator = EmbeddedGroupAffine::generator();
     let pk = generator * secret_key;
