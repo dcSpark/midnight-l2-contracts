@@ -1,35 +1,52 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::convert::TryInto;
 use std::fmt;
-use std::io::Cursor;
 use std::ops::Deref;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use base_crypto::fab::{AlignedValue, ValueAtom};
+use midnight_node_ledger_helpers::base_crypto::fab::{AlignedValue, ValueAtom};
 use clap::{ArgAction, Parser};
 use hex::FromHex;
-use midnight_onchain_state::state::{ChargedState, ContractMaintenanceAuthority, ContractState};
-use midnight_serialize::{Deserializable, tagged_deserialize};
-use midnight_storage::arena::{Sp, set_allow_non_normal_form_deserialization};
-use midnight_storage::db::InMemoryDB;
-use midnight_storage::storage::HashMap as StorageHashMap;
+use midnight_node_ledger_helpers::onchain_runtime::state::ContractState;
+use midnight_node_ledger_helpers::mn_ledger_serialize::tagged_deserialize;
+use midnight_node_ledger_helpers::DefaultDB;
+use midnight_node_ledger_helpers::mn_ledger_storage::arena::Sp;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod bridge_abi;
+mod bridge_batch;
+mod bridge_signatures;
+mod bridge_tx;
+mod zkir_pis;
+
 const DEFAULT_INDEXER_HTTP: &str = "http://127.0.0.1:8088/api/v3/graphql";
 const DEFAULT_CONTRACT_ADDRESS: &str =
-    "5318d3809209676484a89c55046062a723e3c5d0cb07e53547781119be8089ff";
-const LEGACY_CONTRACT_STATE_TAG_V4: &[u8] = b"midnight:contract-state[v4]:";
-
+    "a23a82433d3f4b13c83d3bbeda1e033f4a92a9e46aa5a81ffd966beafa439b82";
 #[derive(Parser, Debug)]
 #[command(
     author,
     version,
-    about = "Decode Bridge deposits via the Midnight indexer"
+    about = "Bridge helper CLI"
 )]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    command: Option<CommandKind>,
+    #[command(flatten)]
+    decode: DecodeArgs,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum CommandKind {
+    Decode(DecodeArgs),
+    CommitBatch(BatchArgs),
+    FinalizeBatch(BatchArgs),
+}
+
+#[derive(Parser, Debug, Clone)]
+struct DecodeArgs {
     /// Bridge contract address (64 hex chars).
     #[arg(long, env = "BRIDGE_CONTRACT_ADDRESS", default_value = DEFAULT_CONTRACT_ADDRESS)]
     contract: String,
@@ -43,14 +60,70 @@ struct Args {
     dump_state: bool,
 }
 
+#[derive(Parser, Debug, Clone)]
+struct BatchArgs {
+    /// Bridge contract address (64 hex chars).
+    #[arg(long, env = "BRIDGE_CONTRACT_ADDRESS", default_value = DEFAULT_CONTRACT_ADDRESS)]
+    contract: String,
+
+    /// GraphQL endpoint for the indexer HTTP API.
+    #[arg(long, env = "INDEXER_HTTP", default_value = DEFAULT_INDEXER_HTTP)]
+    indexer: String,
+
+    /// Midnight node WS endpoint for fetch/send.
+    #[arg(long, env = "MIDNIGHT_NODE_WS", default_value = "ws://127.0.0.1:9944")]
+    node_ws: String,
+
+    /// Override commit batch hash (hex, 32 bytes).
+    #[arg(long)]
+    batch_hash: Option<String>,
+
+    /// Proof server URL (used by remote prover).
+    #[arg(long, env = "PROOF_SERVER", default_value = "http://127.0.0.1:6300")]
+    proof_server: String,
+
+    /// Use local proving instead of the remote proof server.
+    #[arg(long, action = ArgAction::SetTrue)]
+    local_prover: bool,
+
+    /// Wallet seed used to pay fees (hex, lazy-hex, or mnemonic).
+    #[arg(
+        long,
+        env = "FUNDING_SEED",
+        default_value = "0000000000000000000000000000000000000000000000000000000000000001"
+    )]
+    funding_seed: String,
+
+    /// Fetch concurrency for building ledger context from node history.
+    #[arg(long, env = "FETCH_CONCURRENCY", default_value = "20")]
+    fetch_concurrency: usize,
+
+    /// Bridge artifacts directory (contains keys/ and zkir/).
+    #[arg(long, env = "BRIDGE_ARTIFACTS", default_value = "../../counter-contract/dist/managed/Bridge")]
+    bridge_artifacts: String,
+
+    /// Max nonce for signature scanning.
+    #[arg(long, env = "SIGNATURE_MAX_NONCE", default_value = "256")]
+    signature_max_nonce: u64,
+
+    /// Dry-run: build batch data and print commands only.
+    #[arg(long, action = ArgAction::SetTrue)]
+    dry_run: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    // Preview indexer data currently ships legacy contract-state blobs that
-    // violate the storage "normal form" constraint, so accept them.
-    set_allow_non_normal_form_deserialization(true);
+    match cli.command {
+        Some(CommandKind::Decode(args)) => run_decode(args).await,
+        Some(CommandKind::CommitBatch(args)) => run_commit_batch(args).await,
+        Some(CommandKind::FinalizeBatch(args)) => run_finalize_batch(args).await,
+        None => run_decode(cli.decode).await,
+    }
+}
 
+async fn run_decode(args: DecodeArgs) -> Result<()> {
     validate_contract_address(&args.contract)?;
 
     let client = Client::builder()
@@ -108,6 +181,34 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn run_commit_batch(args: BatchArgs) -> Result<()> {
+    validate_contract_address(&args.contract)?;
+    let (ledger, contract_state) = load_bridge_ledger(&args).await?;
+    let plan = bridge_tx::build_commit_batch_plan(&args, &ledger).await?;
+
+    if args.dry_run {
+        println!("Planned commitBatch call for contract {}", args.contract);
+        println!("Planned input alignment: {:?}", plan.input.alignment);
+        return Ok(());
+    }
+
+    bridge_tx::submit_plan(&args, &plan, &contract_state).await
+}
+
+async fn run_finalize_batch(args: BatchArgs) -> Result<()> {
+    validate_contract_address(&args.contract)?;
+    let (ledger, contract_state) = load_bridge_ledger(&args).await?;
+    let plan = bridge_tx::build_finalize_batch_plan(&args, &ledger).await?;
+
+    if args.dry_run {
+        println!("Planned finalizeBatch call for contract {}", args.contract);
+        println!("Planned input alignment: {:?}", plan.input.alignment);
+        return Ok(());
+    }
+
+    bridge_tx::submit_plan(&args, &plan, &contract_state).await
+}
+
 fn validate_contract_address(address: &str) -> Result<()> {
     if address.len() != 64 || !address.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(anyhow!("contract address must be 64 lowercase hex chars"));
@@ -122,6 +223,18 @@ fn dump_bridge_ledger(ledger: &BridgeLedger) -> Result<()> {
     format_json_with_inline_arrays(&normalized, 0, &mut buffer)?;
     println!("Parsed ledger:\n{}", buffer);
     Ok(())
+}
+
+async fn load_bridge_ledger(args: &BatchArgs) -> Result<(BridgeLedger, ContractState<DefaultDB>)> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("failed to build HTTP client")?;
+
+    let state_bytes = fetch_contract_state(&client, &args.indexer, &args.contract).await?;
+    let contract_state = deserialize_contract_state(&state_bytes)?;
+    let ledger = decode_bridge_ledger(&contract_state)?;
+    Ok((ledger, contract_state))
 }
 
 fn format_json_with_inline_arrays(value: &Value, indent: usize, out: &mut String) -> Result<()> {
@@ -323,7 +436,7 @@ struct RollupTail {
     pending_withdrawals: BTreeMap<[u8; 32], u128>,
 }
 
-fn decode_bridge_ledger(state: &ContractState<InMemoryDB>) -> Result<BridgeLedger> {
+fn decode_bridge_ledger(state: &ContractState<DefaultDB>) -> Result<BridgeLedger> {
     let root = state.data.get_ref();
     let root_parts = expect_array(root).context("bridge state root must be an array")?;
     if root_parts.len() != 3 {
@@ -935,40 +1048,8 @@ async fn fetch_contract_state(client: &Client, indexer: &str, address: &str) -> 
     Ok(bytes)
 }
 
-fn deserialize_contract_state(bytes: &[u8]) -> Result<ContractState<InMemoryDB>> {
-    match tagged_deserialize(bytes) {
-        Ok(state) => Ok(state),
-        Err(primary_err) => match deserialize_contract_state_v4(bytes) {
-            Ok(Some(legacy)) => Ok(legacy),
-            Ok(None) => Err(anyhow!(
-                "failed to deserialize ContractState: {}",
-                primary_err
-            )),
-            Err(legacy_err) => Err(anyhow!(
-                "failed to deserialize ContractState: {}; legacy decode error: {}",
-                primary_err,
-                legacy_err
-            )),
-        },
-    }
-}
-
-fn deserialize_contract_state_v4(bytes: &[u8]) -> Result<Option<ContractState<InMemoryDB>>> {
-    if !bytes.starts_with(LEGACY_CONTRACT_STATE_TAG_V4) {
-        return Ok(None);
-    }
-
-    let mut reader = Cursor::new(&bytes[LEGACY_CONTRACT_STATE_TAG_V4.len()..]);
-    let legacy_value = <StateValue as Deserializable>::deserialize(&mut reader, 0)
-        .map_err(|err| anyhow!("legacy contract-state data decode failed: {}", err))?;
-    let data = ChargedState::new(legacy_value);
-
-    Ok(Some(ContractState {
-        data,
-        operations: StorageHashMap::new(),
-        maintenance_authority: ContractMaintenanceAuthority::new(),
-        balance: StorageHashMap::new(),
-    }))
+fn deserialize_contract_state(bytes: &[u8]) -> Result<ContractState<DefaultDB>> {
+    tagged_deserialize(bytes).map_err(|err| anyhow!("failed to deserialize ContractState: {}", err))
 }
 
 #[derive(Deserialize)]
@@ -1001,4 +1082,4 @@ query CONTRACT_STATE_QUERY($address: HexEncoded!, $offset: ContractActionOffset)
 }
 "#;
 
-type StateValue = midnight_onchain_state::state::StateValue<InMemoryDB>;
+type StateValue = midnight_node_ledger_helpers::onchain_runtime::state::StateValue<DefaultDB>;
