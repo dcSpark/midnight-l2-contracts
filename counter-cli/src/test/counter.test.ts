@@ -42,15 +42,15 @@ describe('API', () => {
     const bridgeContractDeployed = await api.deploy(providers, { privateState: 0 });
     expect(bridgeContractDeployed).not.toBeNull();
 
-    const state = await api.displayBridgeState(providers, bridgeContractDeployed);
-    if (state.state === null) {
+    const { ledger } = await api.displayBridgeState(providers, bridgeContractDeployed);
+    if (ledger === null) {
       throw new Error('Expected bridge state to be available after deployment.');
     }
-    expect(state.state.nextCrossDomainMessageIndex).toBe(1n);
-    expect(state.state.nextUnfinalizedQueueIndex).toBe(1n);
-    expect(state.state.lockedNIGHT).toBe(0n);
-    expect(state.state.feeVault).toBe(0n);
-    expect(state.state.withdrawMessageCount).toBe(0n);
+    expect(ledger.L1_nextCrossDomainMessageIndex).toBe(1n);
+    expect(ledger.L1_nextUnfinalizedQueueIndex).toBe(1n);
+    expect(ledger.L1_lockedNIGHT).toBe(0n);
+    expect(ledger.L1_feeVault).toBe(0n);
+    expect(ledger.L1_executedL2ToL1Messages.size()).toBe(0n);
   });
 
   it('Wallet Funcitonalities', async () => {

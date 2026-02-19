@@ -11,7 +11,7 @@
 //
 // CONSENSUS CRITICAL: Any change to these types or hash functions is a breaking change.
 
-pragma language_version >= 0.16;
+pragma language_version >= 0.20;
 
 module ProtocolTypes {
 

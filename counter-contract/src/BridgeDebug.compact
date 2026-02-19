@@ -1,0 +1,118 @@
+// BridgeDebug Contract (L1 Rollup debug harness)
+//
+// Minimal wrapper around L1Rollup to reproduce commitBatch/finalizeBatch behavior.
+
+pragma language_version >= 0.20;
+
+import CompactStandardLibrary;
+import Signer;
+import L1Rollup prefix L1_;
+
+// ============================================================================
+// RE-EXPORTS (for off-chain tooling convenience)
+// ============================================================================
+
+export { derivePk, Signature };
+export { L1_BatchPublicDataV1Full, L1_RollupMiscData };
+
+export pure circuit signBytes32(msg: Bytes<32>, sk: Field, nonce: Field): Signature {
+  return sign<Bytes<32>>(msg, sk, nonce);
+}
+
+export pure circuit verifyBytes32(msg: Bytes<32>, signature: Signature): Boolean {
+  return verifySignature<Bytes<32>>(msg, signature);
+}
+
+// Ledger variables
+export {
+  L1_owner,
+  L1_layer2ChainId,
+  L1_rollupId,
+  L1_verifierSet,
+  L1_signatureThreshold,
+  L1_sequencers,
+  L1_finalizers,
+  L1_committedBatches,
+  L1_finalizedStateRoots,
+  L1_withdrawRoots,
+  L1_miscData,
+  L1_firstCrossDomainMessageIndex,
+  L1_nextCrossDomainMessageIndex,
+  L1_nextUnfinalizedQueueIndex,
+  L1_l1ToL2Deposits,
+  L1_executedL2ToL1Messages,
+  L1_lockedNIGHT,
+  L1_feeVault,
+  L1_messageRollingHashes,
+  L1_pendingWithdrawals,
+};
+
+// ============================================================================
+// CONSTRUCTOR
+// ============================================================================
+
+constructor(
+  owner_: Bytes<32>,
+  layer2ChainId_: Uint<64>,
+  rollupId_: Bytes<32>,
+  genesisStateRoot_: Bytes<32>,
+  genesisBatchHash_: Bytes<32>,
+  verifierSet_: Vector<3, NativePoint>,
+  signatureThreshold_: Uint<8>,
+  initialSequencer_: Bytes<32>,
+  initialFinalizer_: Bytes<32>
+) {
+  L1_initialize(
+    owner_,
+    layer2ChainId_,
+    rollupId_,
+    genesisStateRoot_,
+    genesisBatchHash_,
+    verifierSet_,
+    signatureThreshold_,
+    initialSequencer_,
+    initialFinalizer_
+  );
+}
+
+// ============================================================================
+// BATCH LIFECYCLE (DEBUG SURFACE)
+// ============================================================================
+
+export circuit commitBatch(parentBatchHash_: Bytes<32>, batchHash_: Bytes<32>): Uint<64> {
+  return L1_commitBatch(disclose(parentBatchHash_), disclose(batchHash_));
+}
+
+export circuit finalizeBatch(
+  batchPublicData_: L1_BatchPublicDataV1Full,
+  signatures_: Vector<3, Signature>,
+  signerBitmap_: Uint<8>,
+  finalizeTimestamp_: Uint<64>
+): [] {
+  L1_finalizeBatch(
+    disclose(batchPublicData_),
+    signatures_,
+    disclose(signerBitmap_),
+    disclose(finalizeTimestamp_)
+  );
+}
+
+// ============================================================================
+// ADMIN
+// ============================================================================
+
+export circuit setVerifierSet(newSet_: Vector<3, NativePoint>): [] { L1_setVerifierSet(disclose(newSet_)); }
+
+// ============================================================================
+// QUERY SURFACE
+// ============================================================================
+
+// export circuit lastFinalizedBatchIndex(): Uint<64> { return L1_getLastFinalizedBatchIndex(); }
+// export circuit lastCommittedBatchIndex(): Uint<64> { return L1_getLastCommittedBatchIndex(); }
+
+// export circuit getCommittedBatch(batchIndex_: Uint<64>): Bytes<32> { return L1_getCommittedBatch(disclose(batchIndex_)); }
+// export circuit getFinalizedStateRoot(batchIndex_: Uint<64>): Bytes<32> { return L1_getFinalizedStateRoot(disclose(batchIndex_)); }
+
+// export circuit getMessageRollingHash(index_: Uint<64>): Bytes<32> { return L1_getMessageRollingHash(disclose(index_)); }
+// export circuit getNextCrossDomainMessageIndex(): Uint<64> { return L1_getNextCrossDomainMessageIndex(); }
+// export circuit getNextUnfinalizedQueueIndex(): Uint<64> { return L1_getNextUnfinalizedQueueIndex(); }

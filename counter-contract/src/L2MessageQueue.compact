@@ -11,7 +11,7 @@
 //
 // CONSENSUS CRITICAL: withdrawRoot is verified by L1 during batch finalization.
 
-pragma language_version >= 0.16;
+pragma language_version >= 0.20;
 
 module L2MessageQueue {
 

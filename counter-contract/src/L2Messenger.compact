@@ -10,7 +10,7 @@
 //
 // CONSENSUS CRITICAL: Message hashes must match across all implementations.
 
-pragma language_version >= 0.16;
+pragma language_version >= 0.20;
 
 module L2Messenger {
 

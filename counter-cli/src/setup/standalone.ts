@@ -1,9 +1,9 @@
+import 'dotenv/config';
 import path from 'path';
 import * as api from '../api';
 import { currentDir } from '../config';
 import { createLogger } from '../logger';
 import { TestEnvironment } from '../test/simulators/simulator';
-import 'dotenv/config';
 import { sendArbitraryUnshieldedToken } from '../test/utils/wallet-transfers';
 
 const logDir = path.resolve(currentDir, '..', 'logs', 'setup-undeployed', `${new Date().toISOString()}.log`);
@@ -21,12 +21,16 @@ async function setupStandalone() {
     logger.info(`address keystore ${wallet.unshieldedKeystore.getAddress()}`);
     logger.info(result);
   } catch (error) {
-    logger.error('Setup failed:', error);
+    const decoded = api.decodeRpcError(error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ error: err, decoded }, 'Setup failed');
   }
   // Keep the process running forever
   logger.info('Setup complete. Keeping container alive forever...');
   await new Promise(() => {}); // This never resolves
 }
 setupStandalone().catch((error) => {
-  logger.error('Setup standalone failed', error);
+  const decoded = api.decodeRpcError(error);
+  const err = error instanceof Error ? error : new Error(String(error));
+  logger.error({ error: err, decoded }, 'Setup standalone failed');
 });

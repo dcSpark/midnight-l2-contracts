@@ -1,0 +1,32 @@
+[package]
+name = "decoder-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.95"
+clap = { version = "4.5.23", features = ["derive", "env"] }
+hex = "0.4.3"
+num-bigint = "0.4.6"
+rand = "0.8.5"
+reqwest = { version = "0.12.9", features = ["json", "rustls-tls"] }
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "1.0.133"
+sha2 = "0.10.8"
+tokio = { version = "1.41.1", features = ["macros", "rt-multi-thread"] }
+
+midnight-node-ledger-helpers = { git = "https://github.com/midnightntwrk/midnight-node", rev = "c0e000e5", package = "midnight-node-ledger-helpers", features = [
+    "can-panic",
+] }
+midnight-node-toolkit = { git = "https://github.com/midnightntwrk/midnight-node", rev = "c0e000e5", package = "midnight-node-toolkit" }
+# Use same ledger tag as midnight-node (ledger-7.0.1) so Fr type matches between preimage and zkir VM.
+midnight-ledger = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-ledger", features = [
+    "proving",
+] }
+midnight-onchain-runtime = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-onchain-runtime" }
+midnight-onchain-state = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
+midnight-storage = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-storage" }
+base_crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
+transient_crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-transient-crypto" }
+zkir = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "zkir" }

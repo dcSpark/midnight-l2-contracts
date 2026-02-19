@@ -1,3 +1,6 @@
+import { Buffer } from 'buffer';
+import http from 'node:http';
+import https from 'node:https';
 import path from 'path';
 import type { Logger } from 'pino';
 import {
@@ -24,6 +27,51 @@ export interface TestConfiguration {
   psMode: string;
   cacheFileName: string;
 }
+
+type HttpRequestOptions = {
+  method?: 'GET' | 'POST';
+  headers?: Record<string, string>;
+  body?: string;
+  timeoutMs?: number;
+};
+
+const httpRequest = (target: string, options: HttpRequestOptions = {}): Promise<number> => {
+  const url = new URL(target);
+  const headers: Record<string, string> = { ...(options.headers ?? {}) };
+  if (options.body !== undefined && headers['content-length'] === undefined) {
+    headers['content-length'] = Buffer.byteLength(options.body).toString();
+  }
+  const client = url.protocol === 'https:' ? https : http;
+
+  return new Promise((resolve, reject) => {
+    const request = client.request(
+      {
+        hostname: url.hostname,
+        port: url.port ? Number(url.port) : undefined,
+        path: `${url.pathname}${url.search}` || '/',
+        method: options.method ?? 'GET',
+        timeout: options.timeoutMs ?? 5_000,
+        headers,
+      },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      },
+    );
+
+    request.on('error', reject);
+    request.on('timeout', () => {
+      request.destroy();
+      reject(new Error('Request timed out'));
+    });
+
+    if (options.body !== undefined) {
+      request.write(options.body);
+    }
+
+    request.end();
+  });
+};
 
 export class LocalTestConfig implements TestConfiguration {
   seed = GENESIS_MINT_WALLET_SEED;
@@ -109,12 +157,18 @@ export class TestEnvironment {
     if (process.env.RUN_ENV_TESTS === 'true') {
       this.testConfig = parseArgs(['env']);
       this.logger.info(`Test wallet seed: ${this.testConfig.seed}`);
-      this.logger.info('Proof server starting...');
-      this.container = await TestEnvironment.getProofServerContainer(this.testConfig.psMode);
-      this.testConfig.dappConfig = {
-        ...this.testConfig.dappConfig,
-        proofServer: `http://${this.container.getHost()}:${this.container.getMappedPort(6300).toString()}`,
-      };
+      const configuredProofServer = this.testConfig.dappConfig.proofServer;
+      if (await TestEnvironment.proofServerIsHealthy(configuredProofServer)) {
+        this.logger.info(`Reusing proof server at ${configuredProofServer}`);
+      } else {
+        this.logger.info('Proof server starting...');
+        this.container = await TestEnvironment.getProofServerContainer(this.testConfig.psMode);
+        this.testConfig.dappConfig = {
+          ...this.testConfig.dappConfig,
+          proofServer: `http://${this.container.getHost()}:${this.container.getMappedPort(6300).toString()}`,
+        };
+      }
+      await this.verifyExistingNetworkServices();
     } else {
       this.testConfig = new LocalTestConfig();
       this.logger.info('Test containers starting...');
@@ -125,7 +179,7 @@ export class TestEnvironment {
           'counter-proof-server',
           Wait.forLogMessage('Actix runtime found; starting in Actix runtime', 1),
         )
-        .withWaitStrategy('counter-indexer', Wait.forLogMessage('starting indexing', 1));
+        .withWaitStrategy('counter-indexer', Wait.forLogMessage(/indexer_standalone.*starting/, 1));
       this.env = await this.dockerEnv.up();
 
       this.testConfig.dappConfig = {
@@ -139,6 +193,7 @@ export class TestEnvironment {
           'counter-proof-server',
         ),
       };
+      await this.waitForLocalServicesReady();
     }
     this.logger.info(`Configuration:${JSON.stringify(this.testConfig)}`);
     this.logger.info('Test containers started');
@@ -154,13 +209,116 @@ export class TestEnvironment {
     return mappedUrl.toString().replace(/\/+$/, '');
   };
 
-  static getProofServerContainer = async (env: string) =>
-    await new GenericContainer('bricktowers/proof-server:6.1.0-alpha.6')
+  static getProofServerContainer = async (_env: string) =>
+    await new GenericContainer('midnightntwrk/proof-server:7.0.1')
       .withExposedPorts(6300)
-      .withCommand(['midnight-proof-server', '--network', env])
+      .withCommand(['midnight-proof-server', '-v'])
       .withEnvironment({ RUST_BACKTRACE: 'full' })
       .withWaitStrategy(Wait.forLogMessage('Actix runtime found; starting in Actix runtime', 1))
       .start();
+
+  private async verifyExistingNetworkServices(): Promise<void> {
+    if (this.testConfig.dappConfig.networkId !== 'undeployed') {
+      return;
+    }
+
+    if (await TestEnvironment.nodeIsHealthy(this.testConfig.dappConfig.node)) {
+      this.logger.info(`Detected running node at ${this.testConfig.dappConfig.node}`);
+    } else {
+      this.logger.warn(`Unable to reach node at ${this.testConfig.dappConfig.node}; tests may fail`);
+    }
+
+    if (await TestEnvironment.indexerIsHealthy(this.testConfig.dappConfig.indexer)) {
+      this.logger.info(`Detected running indexer at ${this.testConfig.dappConfig.indexer}`);
+    } else {
+      this.logger.warn(`Unable to reach indexer at ${this.testConfig.dappConfig.indexer}; tests may fail`);
+    }
+  }
+
+  private async waitForLocalServicesReady(): Promise<void> {
+    const maxAttempts = 30;
+    const sleepMs = 2_000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const nodeHealthy = await TestEnvironment.nodeIsHealthy(this.testConfig.dappConfig.node);
+      const indexerHealthy = await TestEnvironment.indexerIsHealthy(this.testConfig.dappConfig.indexer);
+
+      if (nodeHealthy && indexerHealthy) {
+        this.logger.info('Node and indexer are healthy.');
+        return;
+      }
+
+      this.logger.info(
+        `Waiting for services to be healthy (attempt ${attempt}/${maxAttempts}): ` +
+          `node=${nodeHealthy}, indexer=${indexerHealthy}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, sleepMs));
+    }
+
+    this.logger.warn('Timed out waiting for node/indexer readiness; wallet sync may log transient errors.');
+  }
+
+  private static async proofServerIsHealthy(baseUrl: string): Promise<boolean> {
+    try {
+      const url = new URL('/version', baseUrl).toString();
+      const status = await httpRequest(url);
+      return status >= 200 && status < 500;
+    } catch {
+      return false;
+    }
+  }
+
+  private static async nodeIsHealthy(nodeUrl: string): Promise<boolean> {
+    const healthUrl = TestEnvironment.nodeHealthUrl(nodeUrl);
+    if (healthUrl === null) {
+      return false;
+    }
+    try {
+      const status = await httpRequest(healthUrl);
+      return status >= 200 && status < 500;
+    } catch {
+      return false;
+    }
+  }
+
+  private static async indexerIsHealthy(indexerUrl: string): Promise<boolean> {
+    try {
+      const status = await httpRequest(indexerUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({ query: '{ __typename }' }),
+        timeoutMs: 5_000,
+      });
+      return status >= 200 && status < 300;
+    } catch {
+      return false;
+    }
+  }
+
+  private static nodeHealthUrl(nodeUrl: string): string | null {
+    try {
+      const url = new URL(nodeUrl);
+      if (url.protocol === 'ws:') {
+        url.protocol = 'http:';
+      } else if (url.protocol === 'wss:') {
+        url.protocol = 'https:';
+      }
+
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return null;
+      }
+
+      url.pathname = '/health';
+      url.search = '';
+      url.hash = '';
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
 
   shutdown = async () => {
     if (this.walletContext !== undefined) {

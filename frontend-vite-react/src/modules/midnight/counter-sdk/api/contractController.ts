@@ -30,7 +30,7 @@ import {
   getPublicStates,
 } from "@midnight-ntwrk/midnight-js-contracts";
 import { PrivateStateProvider } from "@midnight-ntwrk/midnight-js-types";
-import * as ledger from "@midnight-ntwrk/ledger-v6";
+import * as ledger from "@midnight-ntwrk/ledger-v7";
 
 export const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n];
 export const DEFAULT_SIGNATURE_THRESHOLD = 1n;

@@ -7,7 +7,7 @@ import { describe, it, beforeAll, afterAll } from 'vitest';
 import 'dotenv/config';
 import * as Rx from 'rxjs';
 import { TestEnvironment } from './simulators/simulator';
-import * as ledger from '@midnight-ntwrk/ledger-v6';
+import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { ShieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { tokenValue } from './utils/utils';
 
