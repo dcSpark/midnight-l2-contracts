@@ -119,6 +119,12 @@ pub fn fr_to_u32(f: &Fr) -> Option<u32> {
     }
 }
 
+/// Serialize Fr to decimal string (for JSON output to TS bridge-cli).
+pub fn fr_to_decimal_string(f: &Fr) -> String {
+    use num_bigint::BigUint;
+    BigUint::from_bytes_le(&f.0.to_bytes_le()).to_string()
+}
+
 pub fn finalize_batch_output_alignment() -> Alignment {
     Alignment(Vec::new())
 }

@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 
 mod bridge_abi;
 mod bridge_batch;
+mod bridge_cli_subprocess;
 mod bridge_signatures;
 mod bridge_tx;
 mod zkir_pis;
@@ -183,30 +184,80 @@ async fn run_decode(args: DecodeArgs) -> Result<()> {
 
 async fn run_commit_batch(args: BatchArgs) -> Result<()> {
     validate_contract_address(&args.contract)?;
-    let (ledger, contract_state) = load_bridge_ledger(&args).await?;
-    let plan = bridge_tx::build_commit_batch_plan(&args, &ledger).await?;
 
     if args.dry_run {
+        let (ledger, _) = load_bridge_ledger(&args).await?;
+        let plan = bridge_tx::build_commit_batch_plan(&args, &ledger).await?;
         println!("Planned commitBatch call for contract {}", args.contract);
         println!("Planned input alignment: {:?}", plan.input.alignment);
         return Ok(());
     }
 
-    bridge_tx::submit_plan(&args, &plan, &contract_state).await
+    let (ledger, _) = load_bridge_ledger(&args).await?;
+    let parent_index = ledger.rollup.misc_data.last_committed_batch_index;
+    let parent_hash_bytes = ledger
+        .rollup
+        .committed_batches
+        .get(&parent_index)
+        .ok_or_else(|| anyhow!("no committed batch at index {} (cannot derive parent hash)", parent_index))?;
+    let parent_hash_str = hex::encode(parent_hash_bytes);
+    let batch_hash_str = args.batch_hash.clone().unwrap_or_else(|| {
+        hex::encode(bridge_batch::random_bytes32())
+    });
+
+    let env_args = bridge_cli_subprocess::BatchArgsEnv {
+        contract: args.contract.clone(),
+        indexer: args.indexer.clone(),
+        node_ws: args.node_ws.clone(),
+        proof_server: args.proof_server.clone(),
+        funding_seed: args.funding_seed.clone(),
+    };
+    bridge_cli_subprocess::run_commit_batch(&env_args, &parent_hash_str, &batch_hash_str)
 }
 
 async fn run_finalize_batch(args: BatchArgs) -> Result<()> {
     validate_contract_address(&args.contract)?;
-    let (ledger, contract_state) = load_bridge_ledger(&args).await?;
-    let plan = bridge_tx::build_finalize_batch_plan(&args, &ledger).await?;
 
+    let (ledger, _) = load_bridge_ledger(&args).await?;
     if args.dry_run {
+        let plan = bridge_tx::build_finalize_batch_plan(&args, &ledger).await?;
         println!("Planned finalizeBatch call for contract {}", args.contract);
         println!("Planned input alignment: {:?}", plan.input.alignment);
         return Ok(());
     }
 
-    bridge_tx::submit_plan(&args, &plan, &contract_state).await
+    let snapshot = bridge_batch::snapshot_from_ledger(&ledger);
+    let batch_index = snapshot.last_finalized_batch_index + 1;
+    let batch_hash =
+        bridge_batch::ensure_committed_batch(&ledger.rollup, batch_index)?;
+    let batch_public_data =
+        bridge_batch::build_batch_public_data(&ledger, &snapshot, batch_hash)?;
+    let digest = bridge_batch::hash_batch_public_data_v1_full(&batch_public_data);
+    let signatures = bridge_batch::build_signature_vector(
+        digest,
+        Some(args.signature_max_nonce),
+    )?;
+    let signer_bitmap = bridge_batch::default_signer_bitmap();
+    let finalize_timestamp = 0u64;
+
+    let batch_public_data_json =
+        bridge_cli_subprocess::batch_public_data_to_json(&batch_public_data);
+    let signatures_json = bridge_cli_subprocess::signatures_to_json(&signatures);
+
+    let env_args = bridge_cli_subprocess::BatchArgsEnv {
+        contract: args.contract.clone(),
+        indexer: args.indexer.clone(),
+        node_ws: args.node_ws.clone(),
+        proof_server: args.proof_server.clone(),
+        funding_seed: args.funding_seed.clone(),
+    };
+    bridge_cli_subprocess::run_finalize_batch(
+        &env_args,
+        &batch_public_data_json,
+        &signatures_json,
+        signer_bitmap,
+        finalize_timestamp,
+    )
 }
 
 fn validate_contract_address(address: &str) -> Result<()> {
