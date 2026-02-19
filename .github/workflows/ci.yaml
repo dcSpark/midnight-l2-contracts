@@ -37,7 +37,7 @@ jobs:
         run: npm ci
 
       - name: Compile and test contract
-        working-directory: counter-contract
+        working-directory: bridge-contract
         run: |
           npm run lint
           npm run compact
@@ -45,7 +45,7 @@ jobs:
           npm run test:compile
 
       - name: Compile cli
-        working-directory: counter-cli
+        working-directory: bridge-cli
         run: |
           npm run lint
           npm run typecheck

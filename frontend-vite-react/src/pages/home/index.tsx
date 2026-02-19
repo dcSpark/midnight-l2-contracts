@@ -16,7 +16,7 @@ export function Home() {
       title: 'Bridge Contract',
       description: 'L1 to L2 deposit flow and withdrawal queue',
       icon: <PlusCircle className="w-10 h-10 text-blue-600" />,
-      path: '/counter'
+      path: '/bridge'
     },
   ];
 

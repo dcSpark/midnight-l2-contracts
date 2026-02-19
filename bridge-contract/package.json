@@ -1,0 +1,34 @@
+{
+  "name": "bridge-contract",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/index.browser.d.ts",
+      "import": "./dist/index.browser.js",
+      "default": "./dist/index.browser.js"
+    }
+  },
+  "scripts": {
+    "compact:bridge": "compact compile +0.28.0 src/Bridge.compact src/managed/Bridge",
+    "compact:bridge-debug": "compact compile +0.28.0 src/BridgeDebug.compact src/managed/BridgeDebug",
+    "compact:l2": "compact compile +0.28.0 src/L2Simulation.compact src/managed/L2Simulation",
+    "compact": "npm run compact:bridge && npm run compact:bridge-debug && npm run compact:l2",
+    "test": "vitest run",
+    "test:compile": "npm run compact && vitest run",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/Bridge.compact ./dist",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

@@ -8,10 +8,10 @@
     "build": "npm run copy-contract-keys && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "copy-contract-keys": "mkdir -p ./public/midnight/bridge/keys && mkdir -p ./public/midnight/bridge/zkir && cp -r ../counter-contract/src/managed/Bridge/keys/* ./public/midnight/bridge/keys && cp -r ../counter-contract/src/managed/Bridge/zkir/* ./public/midnight/bridge/zkir"
+    "copy-contract-keys": "mkdir -p ./public/midnight/bridge/keys && mkdir -p ./public/midnight/bridge/zkir && cp -r ../bridge-contract/src/managed/Bridge/keys/* ./public/midnight/bridge/keys && cp -r ../bridge-contract/src/managed/Bridge/zkir/* ./public/midnight/bridge/zkir"
   },
   "dependencies": {
-    "counter-contract": "*",
+    "bridge-contract": "*",
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-dropdown-menu": "^2.1.15",
     "@radix-ui/react-icons": "^1.3.2",
