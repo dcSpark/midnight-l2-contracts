@@ -16,6 +16,8 @@ import {
   runSetVerifierSet,
   runClaimL1WithdrawalUnshielded,
   runDeposit,
+  runRelayWithdrawNightWithProof,
+  runTestWithdraw,
 } from './commands/index.js';
 import {
   parseBatchPublicDataFromJson,
@@ -227,6 +229,118 @@ async function main(): Promise<void> {
           l2Recipient: subOpts.l2Recipient,
           gasLimit: subOpts.gasLimit,
           timestamp: subOpts.timestamp,
+          json: opts.json,
+        });
+      },
+    );
+
+  program
+    .command('relay-withdraw-night-with-proof')
+    .description(
+      'Relay a withdraw proof (call relayWithdrawNIGHTWithProof). Requires --l2-sender, --recipient, --amount, --batch-index, --nonce, --index-bits, --siblings.',
+    )
+    .requiredOption('--l2-sender <hex>', 'L2 sender address (32 bytes, 64 hex chars)')
+    .requiredOption('--recipient <hex>', 'L1 recipient address (32 bytes, 64 hex chars)')
+    .requiredOption('--amount <amount>', 'Amount (decimal string)')
+    .requiredOption('--batch-index <n>', 'Batch index (decimal string)')
+    .requiredOption('--nonce <n>', 'Withdraw nonce (decimal string)')
+    .requiredOption(
+      '--index-bits <json>',
+      'Proof index bits as JSON boolean array (length 16, LSB-first), e.g. \'[false,true,...]\'',
+    )
+    .requiredOption(
+      '--siblings <json>',
+      'Proof siblings as JSON hex array (length 16), e.g. \'["ab..","cd..",...]\'',
+    )
+    .action(
+      async (subOpts: {
+        l2Sender: string;
+        recipient: string;
+        amount: string;
+        batchIndex: string;
+        nonce: string;
+        indexBits: string;
+        siblings: string;
+      }) => {
+        const opts = program.opts();
+        const cliConfig = resolveCliConfig({
+          contract: opts.contract,
+          indexer: opts.indexer,
+          indexerWS: opts.indexerWs,
+          node: opts.node,
+          proofServer: opts.proofServer,
+          network: opts.network,
+        });
+        await runRelayWithdrawNightWithProof(cliConfig, {
+          l2Sender: subOpts.l2Sender,
+          recipient: subOpts.recipient,
+          amount: subOpts.amount,
+          batchIndex: subOpts.batchIndex,
+          nonce: subOpts.nonce,
+          indexBits: subOpts.indexBits,
+          siblings: subOpts.siblings,
+          json: opts.json,
+        });
+      },
+    );
+
+  program
+    .command('test-withdraw')
+    .description(
+      'Run end-to-end withdrawal flow: set-verifier-set, deposit, finalize-batch, relay-withdraw-night-with-proof, and claim-l1-withdrawal-unshielded.',
+    )
+    .option('--deposit-amount <amount>', 'Deposit amount (decimal). Default: derived from wallet balance')
+    .option('--withdraw-amount <amount>', 'Withdraw amount (decimal). Default: deposit/2')
+    .option('--claim-amount <amount>', 'Claim amount (decimal). Default: withdraw-1 when possible')
+    .option('--recipient <hex>', 'Recipient address (32 bytes, 64 hex chars). Default: random sample user')
+    .option('--l2-sender <hex>', 'L2 sender (32 bytes, 64 hex chars). Default: zero bytes')
+    .option('--l2-recipient <hex>', 'L2 recipient for deposit (32 bytes, 64 hex chars). Default: wallet coin key')
+    .option('--gas-limit <n>', 'Deposit gas limit (decimal). Default: 120000', '120000')
+    .option('--timestamp <n>', 'Deposit timestamp (decimal). Default: 0', '0')
+    .option('--signer-bitmap <n>', 'Finalize signer bitmap (decimal). Default: default signer bitmap')
+    .option('--finalize-timestamp <n>', 'Finalize timestamp (decimal). Default: 0', '0')
+    .option('--skip-set-verifier-set', 'Skip the set-verifier-set step')
+    .option('--wait-attempts <n>', 'Polling attempts for async state checks. Default: 20', '20')
+    .option('--wait-delay-ms <n>', 'Polling delay in ms. Default: 3000', '3000')
+    .action(
+      async (subOpts: {
+        depositAmount?: string;
+        withdrawAmount?: string;
+        claimAmount?: string;
+        recipient?: string;
+        l2Sender?: string;
+        l2Recipient?: string;
+        gasLimit: string;
+        timestamp: string;
+        signerBitmap?: string;
+        finalizeTimestamp: string;
+        skipSetVerifierSet?: boolean;
+        waitAttempts: string;
+        waitDelayMs: string;
+      }) => {
+        const opts = program.opts();
+        const cliConfig = resolveCliConfig({
+          contract: opts.contract,
+          indexer: opts.indexer,
+          indexerWS: opts.indexerWs,
+          node: opts.node,
+          proofServer: opts.proofServer,
+          network: opts.network,
+        });
+        await runTestWithdraw(cliConfig, {
+          depositAmount: subOpts.depositAmount,
+          withdrawAmount: subOpts.withdrawAmount,
+          claimAmount: subOpts.claimAmount,
+          recipient: subOpts.recipient,
+          l2Sender: subOpts.l2Sender,
+          l2Recipient: subOpts.l2Recipient,
+          gasLimit: subOpts.gasLimit,
+          timestamp: subOpts.timestamp,
+          signerBitmap: subOpts.signerBitmap,
+          finalizeTimestamp: subOpts.finalizeTimestamp,
+          skipSetVerifierSet: subOpts.skipSetVerifierSet,
+          waitAttempts: subOpts.waitAttempts,
+          waitDelayMs: subOpts.waitDelayMs,
           json: opts.json,
         });
       },

@@ -145,6 +145,8 @@ export type BatchDataParams = {
   contractState: ContractState;
   ledger: BridgeLedger;
   batchHash: Uint8Array;
+  /** Optional explicit withdraw root. If omitted, a random root is generated. */
+  withdrawRoot?: Uint8Array;
 };
 
 export function computeLastProcessedQueueIndex(ledger: BridgeLedger): bigint {
@@ -194,7 +196,7 @@ export async function buildBatchPublicData(
     prevBatchHash,
     postStateRoot: randomBytes32(),
     batchHash: params.batchHash,
-    withdrawRoot: randomBytes32(),
+    withdrawRoot: params.withdrawRoot ?? randomBytes32(),
   } satisfies L1_BatchPublicDataV1Full;
 }
 

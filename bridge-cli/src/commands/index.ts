@@ -13,3 +13,8 @@ export {
   type ClaimL1WithdrawalUnshieldedOptions,
 } from './claim-l1-withdrawal-unshielded.js';
 export { runDeposit, type DepositOptions } from './deposit.js';
+export {
+  runRelayWithdrawNightWithProof,
+  type RelayWithdrawNightWithProofOptions,
+} from './relay-withdraw-night-with-proof.js';
+export { runTestWithdraw, type TestWithdrawOptions } from './test-withdraw.js';
