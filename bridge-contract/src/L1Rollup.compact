@@ -493,7 +493,8 @@ module L1Rollup {
     }
 
     const user = UserAddress { bytes: recipient };
-    sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
+    // TODO: uncomment on ledger-v8 where this is hopefully fixed again
+    // sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
   }
 
   // Claim fees (sequencer or owner). Partial spends supported, change reinserted.
