@@ -328,7 +328,6 @@ export function hashBatchPublicDataV1Full(b: L1_BatchPublicDataV1Full): Uint8Arr
     ensureBytes32Length(b.prevStateRoot, 'prevStateRoot'),
     ensureBytes32Length(b.prevBatchHash, 'prevBatchHash'),
     ensureBytes32Length(b.postStateRoot, 'postStateRoot'),
-    ensureBytes32Length(b.batchHash, 'batchHash'),
     ensureBytes32Length(b.withdrawRoot, 'withdrawRoot'),
   ];
   return sha256(concatBytes32Chunks(chunks));
