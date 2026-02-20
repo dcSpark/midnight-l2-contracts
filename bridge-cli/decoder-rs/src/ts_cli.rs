@@ -1,17 +1,43 @@
-//! Invoke the TypeScript bridge-cli (commit-batch / finalize-batch) via subprocess.
-//! Commit/finalize in pure Rust does not work; this delegates to the working TS implementation.
+//! Invoke the TypeScript bridge-cli via subprocess.
 
 use anyhow::{Context, Result};
 use std::process::Command;
 
-use crate::bridge_abi::BatchPublicDataV1Full;
-/// BatchArgs subset needed to build env for the subprocess.
-pub struct BatchArgsEnv {
+use crate::bridge::abi::BatchPublicDataV1Full;
+use crate::cli::BridgeCallArgs;
+
+/// Env vars passed to TypeScript bridge-cli subprocess calls.
+pub struct TsCliEnvVars {
     pub contract: String,
     pub indexer: String,
     pub node_ws: String,
     pub proof_server: String,
     pub funding_seed: String,
+    pub local_prover: bool,
+    pub fetch_concurrency: usize,
+    pub bridge_artifacts: String,
+}
+
+impl TsCliEnvVars {
+    pub fn from_bridge_call(args: &BridgeCallArgs) -> Self {
+        Self {
+            contract: args.contract.clone(),
+            indexer: args.indexer.clone(),
+            node_ws: args.node_ws.clone(),
+            proof_server: args.proof_server.clone(),
+            funding_seed: args.funding_seed.clone(),
+            local_prover: args.local_prover,
+            fetch_concurrency: args.fetch_concurrency,
+            bridge_artifacts: args.bridge_artifacts.clone(),
+        }
+    }
+}
+
+pub fn validate_contract_address(address: &str) -> Result<()> {
+    if address.len() != 64 || !address.chars().all(|c| c.is_ascii_hexdigit()) {
+        anyhow::bail!("contract address must be 64 lowercase hex chars");
+    }
+    Ok(())
 }
 
 /// Directory containing the bridge-cli package (where package.json and src/cli.ts live).
@@ -27,7 +53,7 @@ fn bridge_cli_root() -> Result<std::path::PathBuf> {
     Ok(parent.to_path_buf())
 }
 
-fn run_bridge_cli_cmd(args: &[&str], env_args: &BatchArgsEnv) -> Result<std::process::ExitStatus> {
+fn run_bridge_cli_cmd(args: &[&str], env_args: &TsCliEnvVars) -> Result<std::process::ExitStatus> {
     let root = bridge_cli_root()?;
     let mut cmd = Command::new("npx");
     cmd.args(["--yes", "tsx", "src/cli.ts"])
@@ -37,7 +63,10 @@ fn run_bridge_cli_cmd(args: &[&str], env_args: &BatchArgsEnv) -> Result<std::pro
         .env("INDEXER_HTTP", &env_args.indexer)
         .env("MIDNIGHT_NODE_WS", &env_args.node_ws)
         .env("PROOF_SERVER", &env_args.proof_server)
-        .env("FUNDING_SEED", &env_args.funding_seed);
+        .env("FUNDING_SEED", &env_args.funding_seed)
+        .env("LOCAL_PROVER", if env_args.local_prover { "1" } else { "0" })
+        .env("FETCH_CONCURRENCY", env_args.fetch_concurrency.to_string())
+        .env("BRIDGE_ARTIFACTS", &env_args.bridge_artifacts);
     let status = cmd
         .status()
         .context("failed to run bridge-cli (is Node/npx/tsx available?)")?;
@@ -46,7 +75,7 @@ fn run_bridge_cli_cmd(args: &[&str], env_args: &BatchArgsEnv) -> Result<std::pro
 
 fn run_bridge_cli_cmd_output(
     args: &[&str],
-    env_args: &BatchArgsEnv,
+    env_args: &TsCliEnvVars,
     extra_env: &[(&str, String)],
 ) -> Result<std::process::Output> {
     let root = bridge_cli_root()?;
@@ -58,7 +87,10 @@ fn run_bridge_cli_cmd_output(
         .env("INDEXER_HTTP", &env_args.indexer)
         .env("MIDNIGHT_NODE_WS", &env_args.node_ws)
         .env("PROOF_SERVER", &env_args.proof_server)
-        .env("FUNDING_SEED", &env_args.funding_seed);
+        .env("FUNDING_SEED", &env_args.funding_seed)
+        .env("LOCAL_PROVER", if env_args.local_prover { "1" } else { "0" })
+        .env("FETCH_CONCURRENCY", env_args.fetch_concurrency.to_string())
+        .env("BRIDGE_ARTIFACTS", &env_args.bridge_artifacts);
     for (key, value) in extra_env {
         cmd.env(key, value);
     }
@@ -70,7 +102,7 @@ fn run_bridge_cli_cmd_output(
 
 /// Run `bridge-cli commit-batch` with the given args. Forwards stdout/stderr.
 /// Both parent_hash and batch_hash are required by the TS CLI.
-pub fn run_commit_batch(env_args: &BatchArgsEnv, parent_hash: &str, batch_hash: &str) -> Result<()> {
+pub fn run_commit_batch(env_args: &TsCliEnvVars, parent_hash: &str, batch_hash: &str) -> Result<()> {
     let args = [
         "commit-batch",
         "--contract",
@@ -111,7 +143,7 @@ pub fn batch_public_data_to_json(bpd: &BatchPublicDataV1Full) -> String {
 
 /// Run `bridge-cli finalize-batch` with the four required arguments (two JSON, two decimal).
 pub fn run_finalize_batch(
-    env_args: &BatchArgsEnv,
+    env_args: &TsCliEnvVars,
     batch_public_data_json: &str,
     signatures_json: &str,
     signer_bitmap: u8,
@@ -140,7 +172,7 @@ pub fn run_finalize_batch(
 
 /// Run `bridge-cli deposit` and forward arguments as-is.
 pub fn run_deposit(
-    env_args: &BatchArgsEnv,
+    env_args: &TsCliEnvVars,
     amount: &str,
     l2_recipient: Option<&str>,
     gas_limit: Option<&str>,
@@ -173,7 +205,7 @@ pub fn run_deposit(
 
 /// Build signatures JSON via TS batch-helpers to match contract/browser pure circuits exactly.
 pub fn build_signatures_json_from_batch(
-    env_args: &BatchArgsEnv,
+    env_args: &TsCliEnvVars,
     batch_public_data_json: &str,
     signature_max_nonce: u64,
 ) -> Result<String> {

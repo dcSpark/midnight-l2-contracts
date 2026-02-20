@@ -13,7 +13,6 @@
 - Rust toolchain (stable, with `cargo`)
 - For **decode** only: running indexer GraphQL endpoint (default `http://127.0.0.1:8088/api/v3/graphql`)
 - For **commit-batch** / **finalize-batch**: Node.js with `npx` and `tsx` (the TS bridge-cli is run as a subprocess). Same Midnight services as the bridge-cli (node WS, indexer, proof server, wallet seed). Run from `bridge-cli/decoder-rs` so the parent directory is the bridge-cli package root, or set `BRIDGE_CLI_DIR` to that path.
-- **dry-run** for commit-batch/finalize-batch: Bridge artifacts at `bridge-contract/dist/managed/Bridge` (for planning only; submit path uses TS).
 
 ## Commands
 
@@ -24,18 +23,16 @@ cargo run -- decode
 ```
 
 ```bash
-cargo run -- commit-batch [--dry-run]
+cargo run -- commit-batch
 ```
 
 ```bash
-cargo run -- finalize-batch [--dry-run]
+cargo run -- finalize-batch
 ```
 
 ```bash
 cargo run -- deposit --amount <decimal> [--l2-recipient <64_hex>] [--gas-limit <decimal>] [--timestamp <decimal>]
 ```
-
-With `--dry-run`, the Rust code builds the planned call and prints it (no Node required). Without `--dry-run`, the commands invoke the TypeScript bridge-cli to build, prove, and submit the transaction.
 
 ## Mock batch flow
 
@@ -99,7 +96,7 @@ cargo run -- deposit --amount 100
 - `PROOF_SERVER`: proof server endpoint
 - `FUNDING_SEED`: wallet seed (or mnemonic) used for transaction funding
 - `BRIDGE_CLI_DIR`: optional; directory containing the bridge-cli package (default: parent of decoder-rs)
-- `BRIDGE_ARTIFACTS`: for dry-run only; path containing Bridge `keys/` and `zkir/`
+- `BRIDGE_ARTIFACTS`: path containing Bridge `keys/` and `zkir/`
 - `SIGNATURE_MAX_NONCE`: max nonce scan depth for signature generation (passed to TS)
 
 You can also pass these as CLI flags (`--contract`, `--indexer`, `--node-ws`, and so on).
@@ -107,4 +104,3 @@ You can also pass these as CLI flags (`--contract`, `--indexer`, `--node-ws`, an
 ## Troubleshooting
 
 - If **commit-batch** or **finalize-batch** fails with "failed to run bridge-cli", ensure Node.js, `npx`, and `tsx` are installed and that you are running from `bridge-cli/decoder-rs` (or set `BRIDGE_CLI_DIR`).
-- For **dry-run** only: if you see `UnsupportedBlockVersion(...)` when building the plan, the midnight-node-toolkit revision may not match your node runtime; use the TS path (no `--dry-run`) to submit.
