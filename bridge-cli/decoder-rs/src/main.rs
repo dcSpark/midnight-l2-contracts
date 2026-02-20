@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::convert::TryInto;
 use std::fmt;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -25,6 +26,8 @@ mod bridge_tx;
 const DEFAULT_INDEXER_HTTP: &str = "http://127.0.0.1:8088/api/v3/graphql";
 const DEFAULT_CONTRACT_ADDRESS: &str =
     "a23a82433d3f4b13c83d3bbeda1e033f4a92a9e46aa5a81ffd966beafa439b82";
+const MOCK_BATCH_DIR: &str = ".mock-batches";
+const MOCK_BATCH_FILENAME: &str = "latest.json";
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -73,10 +76,6 @@ struct BatchArgs {
     /// Midnight node WS endpoint for fetch/send.
     #[arg(long, env = "MIDNIGHT_NODE_WS", default_value = "ws://127.0.0.1:9944")]
     node_ws: String,
-
-    /// Override commit batch hash (hex, 32 bytes).
-    #[arg(long)]
-    batch_hash: Option<String>,
 
     /// Proof server URL (used by remote prover).
     #[arg(long, env = "PROOF_SERVER", default_value = "http://127.0.0.1:6300")]
@@ -204,9 +203,13 @@ async fn run_commit_batch(args: BatchArgs) -> Result<()> {
         .get(&parent_index)
         .ok_or_else(|| anyhow!("no committed batch at index {} (cannot derive parent hash)", parent_index))?;
     let parent_hash_str = hex::encode(parent_hash_bytes);
-    let batch_hash_str = args.batch_hash.clone().unwrap_or_else(|| {
-        hex::encode(bridge_batch::random_bytes32())
-    });
+    let snapshot = bridge_batch::snapshot_from_ledger(&ledger);
+    let mut batch_public_data =
+        bridge_batch::build_batch_public_data(&ledger, &snapshot, [0u8; 32])?;
+    let batch_hash = bridge_batch::hash_batch_public_data_v1_full(&batch_public_data);
+    batch_public_data.batch_hash = batch_hash;
+    write_latest_mock_batch(&batch_public_data)?;
+    let batch_hash_str = hex::encode(batch_hash);
 
     let env_args = bridge_cli_subprocess::BatchArgsEnv {
         contract: args.contract.clone(),
@@ -222,31 +225,46 @@ async fn run_finalize_batch(args: BatchArgs) -> Result<()> {
     validate_contract_address(&args.contract)?;
 
     let (ledger, _) = load_bridge_ledger(&args).await?;
+    let batch_public_data = read_latest_mock_batch()?;
+    let expected_batch_index = ledger.rollup.misc_data.last_finalized_batch_index + 1;
+    if batch_public_data.batch_index != expected_batch_index {
+        return Err(anyhow!(
+            "mock batch index {} does not match expected pending index {}",
+            batch_public_data.batch_index,
+            expected_batch_index
+        ));
+    }
+    let committed_batch_hash =
+        bridge_batch::ensure_committed_batch(&ledger.rollup, expected_batch_index)?;
+    if batch_public_data.batch_hash != committed_batch_hash {
+        return Err(anyhow!(
+            "mock batch hash {} does not match committed hash {} at batch index {}",
+            hex::encode(batch_public_data.batch_hash),
+            hex::encode(committed_batch_hash),
+            expected_batch_index
+        ));
+    }
+    let digest = bridge_batch::hash_batch_public_data_v1_full(&batch_public_data);
+    let signer_bitmap = bridge_batch::default_signer_bitmap();
+    let finalize_timestamp = 0u64;
     if args.dry_run {
-        let plan = bridge_tx::build_finalize_batch_plan(&args, &ledger).await?;
+        let signatures = bridge_batch::build_signature_vector(
+            digest,
+            Some(args.signature_max_nonce),
+        )?;
+        let planned_input = bridge_abi::encode_finalize_batch(
+            &batch_public_data,
+            &signatures,
+            signer_bitmap,
+            finalize_timestamp,
+        )?;
         println!("Planned finalizeBatch call for contract {}", args.contract);
-        println!("Planned input alignment: {:?}", plan.input.alignment);
+        println!("Planned input alignment: {:?}", planned_input.alignment);
         return Ok(());
     }
 
-    let snapshot = bridge_batch::snapshot_from_ledger(&ledger);
-    let batch_index = snapshot.last_finalized_batch_index + 1;
-    let batch_hash =
-        bridge_batch::ensure_committed_batch(&ledger.rollup, batch_index)?;
-    let batch_public_data =
-        bridge_batch::build_batch_public_data(&ledger, &snapshot, batch_hash)?;
-    let digest = bridge_batch::hash_batch_public_data_v1_full(&batch_public_data);
-    let signatures = bridge_batch::build_signature_vector(
-        digest,
-        Some(args.signature_max_nonce),
-    )?;
-    let signer_bitmap = bridge_batch::default_signer_bitmap();
-    let finalize_timestamp = 0u64;
-
     let batch_public_data_json =
         bridge_cli_subprocess::batch_public_data_to_json(&batch_public_data);
-    let signatures_json = bridge_cli_subprocess::signatures_to_json(&signatures);
-
     let env_args = bridge_cli_subprocess::BatchArgsEnv {
         contract: args.contract.clone(),
         indexer: args.indexer.clone(),
@@ -254,6 +272,11 @@ async fn run_finalize_batch(args: BatchArgs) -> Result<()> {
         proof_server: args.proof_server.clone(),
         funding_seed: args.funding_seed.clone(),
     };
+    let signatures_json = bridge_cli_subprocess::build_signatures_json_from_batch(
+        &env_args,
+        &batch_public_data_json,
+        args.signature_max_nonce,
+    )?;
     bridge_cli_subprocess::run_finalize_batch(
         &env_args,
         &batch_public_data_json,
@@ -261,6 +284,43 @@ async fn run_finalize_batch(args: BatchArgs) -> Result<()> {
         signer_bitmap,
         finalize_timestamp,
     )
+}
+
+fn latest_mock_batch_path() -> PathBuf {
+    PathBuf::from(MOCK_BATCH_DIR).join(MOCK_BATCH_FILENAME)
+}
+
+fn write_latest_mock_batch(batch: &bridge_abi::BatchPublicDataV1Full) -> Result<()> {
+    let path = latest_mock_batch_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create mock batch directory {}", parent.display())
+        })?;
+    }
+    let payload =
+        serde_json::to_string_pretty(batch).context("failed to serialize mock batch json")?;
+    let mut tmp_path = path.clone();
+    tmp_path.set_extension("json.tmp");
+    std::fs::write(&tmp_path, payload)
+        .with_context(|| format!("failed to write {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, &path).with_context(|| {
+        format!(
+            "failed to atomically move {} to {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
+    println!("Wrote mock batch file: {}", path.display());
+    Ok(())
+}
+
+fn read_latest_mock_batch() -> Result<bridge_abi::BatchPublicDataV1Full> {
+    let path = latest_mock_batch_path();
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read mock batch file {}", path.display()))?;
+    let batch = serde_json::from_str::<bridge_abi::BatchPublicDataV1Full>(&raw)
+        .with_context(|| format!("failed to parse mock batch json {}", path.display()))?;
+    Ok(batch)
 }
 
 fn validate_contract_address(address: &str) -> Result<()> {

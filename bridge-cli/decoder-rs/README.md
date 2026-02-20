@@ -4,6 +4,8 @@
 
 - **decode**: Reads and prints Bridge contract state from the indexer (pure Rust).
 - **commit-batch** / **finalize-batch**: Commit and finalize batches by **delegating to the TypeScript bridge-cli**. The pure-Rust path for commit/finalize does not work; these commands spawn the refactored bridge-cli (TS) subprocess with the same env and args so you can test the TS-from-Rust flow.
+  - `commit-batch` now builds a mock `BatchPublicDataV1Full`, derives `batchHash` from it, and writes the full batch to `.mock-batches/latest.json`.
+  - `finalize-batch` now reads `.mock-batches/latest.json` and uses that payload to construct finalize inputs.
 
 ## Prerequisites
 
@@ -29,6 +31,18 @@ cargo run -- finalize-batch [--dry-run]
 ```
 
 With `--dry-run`, the Rust code builds the planned call and prints it (no Node required). Without `--dry-run`, the commands invoke the TypeScript bridge-cli to build, prove, and submit the transaction.
+
+## Mock batch flow
+
+`commit-batch` and `finalize-batch` are now coupled through a persisted mock batch file:
+
+1. Run `commit-batch`.
+2. It fetches ledger context, builds a mock `BatchPublicDataV1Full`, derives `batchHash`, and submits `commitBatch(parentHash, batchHash)`.
+3. It writes the full mock batch JSON to `decoder-rs/.mock-batches/latest.json`.
+4. Run `finalize-batch`.
+5. It reads `decoder-rs/.mock-batches/latest.json`, validates it against on-chain pending batch index/hash, signs, and submits `finalizeBatch(...)`.
+
+If `latest.json` is missing or stale for the current chain state, `finalize-batch` fails with a validation error.
 
 ## Local Network Examples
 

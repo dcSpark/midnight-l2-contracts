@@ -28,19 +28,6 @@ pub fn snapshot_from_ledger(ledger: &BridgeLedger) -> RollupSnapshot {
     }
 }
 
-pub fn commit_batch_hash_override(raw: Option<&str>) -> Result<Option<[u8; 32]>> {
-    let Some(raw) = raw else {
-        return Ok(None);
-    };
-    let bytes = hex::decode(raw.trim()).map_err(|err| anyhow!("invalid batch hash: {err}"))?;
-    if bytes.len() != 32 {
-        return Err(anyhow!("batch hash override must be 32 bytes"));
-    }
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&bytes);
-    Ok(Some(out))
-}
-
 pub fn compute_last_processed_queue_index(snapshot: &RollupSnapshot) -> u64 {
     if snapshot.next_cross_domain_message_index == 0 {
         return 0;
@@ -98,7 +85,6 @@ pub fn hash_batch_public_data_v1_full(bpd: &BatchPublicDataV1Full) -> [u8; 32] {
     hasher.update(bpd.prev_state_root);
     hasher.update(bpd.prev_batch_hash);
     hasher.update(bpd.post_state_root);
-    hasher.update(bpd.batch_hash);
     hasher.update(bpd.withdraw_root);
     let digest = hasher.finalize();
     let mut out = [0u8; 32];

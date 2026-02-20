@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use std::process::Command;
 
-use crate::bridge_abi::{BatchPublicDataV1Full, Signature, fr_to_decimal_string};
+use crate::bridge_abi::BatchPublicDataV1Full;
 /// BatchArgs subset needed to build env for the subprocess.
 pub struct BatchArgsEnv {
     pub contract: String,
@@ -42,6 +42,30 @@ fn run_bridge_cli_cmd(args: &[&str], env_args: &BatchArgsEnv) -> Result<std::pro
         .status()
         .context("failed to run bridge-cli (is Node/npx/tsx available?)")?;
     Ok(status)
+}
+
+fn run_bridge_cli_cmd_output(
+    args: &[&str],
+    env_args: &BatchArgsEnv,
+    extra_env: &[(&str, String)],
+) -> Result<std::process::Output> {
+    let root = bridge_cli_root()?;
+    let mut cmd = Command::new("npx");
+    cmd.args(["--yes", "tsx"])
+        .args(args)
+        .current_dir(&root)
+        .env("BRIDGE_CONTRACT_ADDRESS", &env_args.contract)
+        .env("INDEXER_HTTP", &env_args.indexer)
+        .env("MIDNIGHT_NODE_WS", &env_args.node_ws)
+        .env("PROOF_SERVER", &env_args.proof_server)
+        .env("FUNDING_SEED", &env_args.funding_seed);
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
+    let output = cmd
+        .output()
+        .context("failed to run bridge-cli helper script (is Node/npx/tsx available?)")?;
+    Ok(output)
 }
 
 /// Run `bridge-cli commit-batch` with the given args. Forwards stdout/stderr.
@@ -85,21 +109,6 @@ pub fn batch_public_data_to_json(bpd: &BatchPublicDataV1Full) -> String {
     .to_string()
 }
 
-/// Serialize [Signature; 3] to JSON string expected by TS CLI (pk, r, s with x,y,s as decimal strings).
-pub fn signatures_to_json(sigs: &[Signature; 3]) -> String {
-    let arr: Vec<serde_json::Value> = sigs
-        .iter()
-        .map(|sig| {
-            serde_json::json!({
-                "pk": { "x": fr_to_decimal_string(&sig.pk.x), "y": fr_to_decimal_string(&sig.pk.y) },
-                "r": { "x": fr_to_decimal_string(&sig.r.x), "y": fr_to_decimal_string(&sig.r.y) },
-                "s": fr_to_decimal_string(&sig.s),
-            })
-        })
-        .collect();
-    serde_json::to_string(&arr).expect("signatures JSON")
-}
-
 /// Run `bridge-cli finalize-batch` with the four required arguments (two JSON, two decimal).
 pub fn run_finalize_batch(
     env_args: &BatchArgsEnv,
@@ -127,4 +136,52 @@ pub fn run_finalize_batch(
     } else {
         anyhow::bail!("bridge-cli finalize-batch exited with {}", status)
     }
+}
+
+/// Build signatures JSON via TS batch-helpers to match contract/browser pure circuits exactly.
+pub fn build_signatures_json_from_batch(
+    env_args: &BatchArgsEnv,
+    batch_public_data_json: &str,
+    signature_max_nonce: u64,
+) -> Result<String> {
+    let ts_script = r#"
+import {
+  parseBatchPublicDataFromJson,
+  hashBatchPublicDataV1Full,
+  buildSignatureVector,
+  signaturesToJson,
+} from './src/batch-helpers.ts';
+
+const raw = process.env.BATCH_PUBLIC_DATA_JSON ?? '';
+if (!raw) {
+  throw new Error('missing batch public data json arg');
+}
+const bpd = parseBatchPublicDataFromJson(raw);
+const digest = hashBatchPublicDataV1Full(bpd);
+const sigs = buildSignatureVector(digest);
+process.stdout.write(signaturesToJson(sigs));
+"#;
+    let args = ["-e", ts_script];
+    let output = run_bridge_cli_cmd_output(
+        &args,
+        env_args,
+        &[
+            ("SIGNATURE_MAX_NONCE", signature_max_nonce.to_string()),
+            (
+                "BATCH_PUBLIC_DATA_JSON",
+                batch_public_data_json.to_string(),
+            ),
+        ],
+    )?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "bridge-cli TS signature helper exited with {}: {}",
+            output.status,
+            stderr.trim()
+        );
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .context("bridge-cli TS signature helper output was not valid UTF-8")?;
+    Ok(stdout.trim().to_string())
 }
