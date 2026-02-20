@@ -6,6 +6,7 @@
 - **commit-batch** / **finalize-batch**: Commit and finalize batches by **delegating to the TypeScript bridge-cli**. The pure-Rust path for commit/finalize does not work; these commands spawn the refactored bridge-cli (TS) subprocess with the same env and args so you can test the TS-from-Rust flow.
   - `commit-batch` now builds a mock `BatchPublicDataV1Full`, derives `batchHash` from it, and writes the full batch to `.mock-batches/latest.json`.
   - `finalize-batch` now reads `.mock-batches/latest.json` and uses that payload to construct finalize inputs.
+- **deposit**: Delegates to TypeScript `bridge-cli deposit` (calls `depositNIGHTUnshielded`).
 
 ## Prerequisites
 
@@ -28,6 +29,10 @@ cargo run -- commit-batch [--dry-run]
 
 ```bash
 cargo run -- finalize-batch [--dry-run]
+```
+
+```bash
+cargo run -- deposit --amount <decimal> [--l2-recipient <64_hex>] [--gas-limit <decimal>] [--timestamp <decimal>]
 ```
 
 With `--dry-run`, the Rust code builds the planned call and prints it (no Node required). Without `--dry-run`, the commands invoke the TypeScript bridge-cli to build, prove, and submit the transaction.
@@ -73,6 +78,17 @@ PROOF_SERVER="http://127.0.0.1:6300" \
 BRIDGE_CONTRACT_ADDRESS="<64_hex_bridge_address>" \
 FUNDING_SEED="<wallet_seed_or_mnemonic>" \
 cargo run -- finalize-batch
+```
+
+Deposit (delegates to bridge-cli TS):
+
+```bash
+INDEXER_HTTP="http://127.0.0.1:8088/api/v3/graphql" \
+MIDNIGHT_NODE_WS="ws://127.0.0.1:9944" \
+PROOF_SERVER="http://127.0.0.1:6300" \
+BRIDGE_CONTRACT_ADDRESS="<64_hex_bridge_address>" \
+FUNDING_SEED="<wallet_seed_or_mnemonic>" \
+cargo run -- deposit --amount 100
 ```
 
 ## Environment Variables

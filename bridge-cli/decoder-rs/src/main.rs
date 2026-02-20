@@ -46,6 +46,7 @@ enum CommandKind {
     Decode(DecodeArgs),
     CommitBatch(BatchArgs),
     FinalizeBatch(BatchArgs),
+    Deposit(DepositArgs),
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -110,6 +111,49 @@ struct BatchArgs {
     dry_run: bool,
 }
 
+#[derive(Parser, Debug, Clone)]
+struct DepositArgs {
+    /// Bridge contract address (64 hex chars).
+    #[arg(long, env = "BRIDGE_CONTRACT_ADDRESS", default_value = DEFAULT_CONTRACT_ADDRESS)]
+    contract: String,
+
+    /// GraphQL endpoint for the indexer HTTP API.
+    #[arg(long, env = "INDEXER_HTTP", default_value = DEFAULT_INDEXER_HTTP)]
+    indexer: String,
+
+    /// Midnight node WS endpoint for fetch/send.
+    #[arg(long, env = "MIDNIGHT_NODE_WS", default_value = "ws://127.0.0.1:9944")]
+    node_ws: String,
+
+    /// Proof server URL (used by remote prover).
+    #[arg(long, env = "PROOF_SERVER", default_value = "http://127.0.0.1:6300")]
+    proof_server: String,
+
+    /// Wallet seed used to pay fees (hex, lazy-hex, or mnemonic).
+    #[arg(
+        long,
+        env = "FUNDING_SEED",
+        default_value = "0000000000000000000000000000000000000000000000000000000000000001"
+    )]
+    funding_seed: String,
+
+    /// Amount in NIGHT (decimal string).
+    #[arg(long)]
+    amount: String,
+
+    /// Optional L2 recipient (64 hex chars). Defaults to wallet coin public key in TS CLI.
+    #[arg(long)]
+    l2_recipient: Option<String>,
+
+    /// Optional gas limit for L2 (decimal string). Default in TS CLI: 100000.
+    #[arg(long)]
+    gas_limit: Option<String>,
+
+    /// Optional message timestamp (decimal string). Default in TS CLI: 0.
+    #[arg(long)]
+    timestamp: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load .env from current dir or parent (bridge-cli) so BRIDGE_CONTRACT_ADDRESS etc. are set
@@ -122,6 +166,7 @@ async fn main() -> Result<()> {
         Some(CommandKind::Decode(args)) => run_decode(args).await,
         Some(CommandKind::CommitBatch(args)) => run_commit_batch(args).await,
         Some(CommandKind::FinalizeBatch(args)) => run_finalize_batch(args).await,
+        Some(CommandKind::Deposit(args)) => run_deposit(args),
         None => run_decode(cli.decode).await,
     }
 }
@@ -283,6 +328,26 @@ async fn run_finalize_batch(args: BatchArgs) -> Result<()> {
         &signatures_json,
         signer_bitmap,
         finalize_timestamp,
+    )
+}
+
+fn run_deposit(args: DepositArgs) -> Result<()> {
+    validate_contract_address(&args.contract)?;
+
+    let env_args = bridge_cli_subprocess::BatchArgsEnv {
+        contract: args.contract.clone(),
+        indexer: args.indexer.clone(),
+        node_ws: args.node_ws.clone(),
+        proof_server: args.proof_server.clone(),
+        funding_seed: args.funding_seed.clone(),
+    };
+
+    bridge_cli_subprocess::run_deposit(
+        &env_args,
+        &args.amount,
+        args.l2_recipient.as_deref(),
+        args.gas_limit.as_deref(),
+        args.timestamp.as_deref(),
     )
 }
 

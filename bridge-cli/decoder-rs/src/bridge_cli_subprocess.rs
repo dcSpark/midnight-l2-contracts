@@ -138,6 +138,39 @@ pub fn run_finalize_batch(
     }
 }
 
+/// Run `bridge-cli deposit` and forward arguments as-is.
+pub fn run_deposit(
+    env_args: &BatchArgsEnv,
+    amount: &str,
+    l2_recipient: Option<&str>,
+    gas_limit: Option<&str>,
+    timestamp: Option<&str>,
+) -> Result<()> {
+    let mut args = vec![
+        "deposit",
+        "--contract",
+        env_args.contract.as_str(),
+        "--amount",
+        amount,
+    ];
+    if let Some(value) = l2_recipient {
+        args.extend(["--l2-recipient", value]);
+    }
+    if let Some(value) = gas_limit {
+        args.extend(["--gas-limit", value]);
+    }
+    if let Some(value) = timestamp {
+        args.extend(["--timestamp", value]);
+    }
+
+    let status = run_bridge_cli_cmd(&args, env_args)?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("bridge-cli deposit exited with {}", status)
+    }
+}
+
 /// Build signatures JSON via TS batch-helpers to match contract/browser pure circuits exactly.
 pub fn build_signatures_json_from_batch(
     env_args: &BatchArgsEnv,
