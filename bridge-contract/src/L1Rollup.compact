@@ -493,7 +493,8 @@ module L1Rollup {
     }
 
     const user = UserAddress { bytes: recipient };
-    sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
+    // TODO: uncomment on ledger-v8 where this is hopefully fixed again
+    // sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
   }
 
   // Claim fees (sequencer or owner). Partial spends supported, change reinserted.
@@ -672,7 +673,7 @@ module L1Rollup {
   }
 
   export pure circuit hashBatchPublicDataV1Full(b: BatchPublicDataV1Full): Bytes<32> {
-    return persistentHash<Vector<15, Bytes<32>>>([
+    return persistentHash<Vector<14, Bytes<32>>>([
       pad(32, "mdn:bpd:v1full"),
       ((b.version as Field) as Bytes<32>),
       PT_u64ToBytes32LE(b.layer2ChainId),
@@ -686,7 +687,6 @@ module L1Rollup {
       b.prevStateRoot,
       b.prevBatchHash,
       b.postStateRoot,
-      b.batchHash,
       b.withdrawRoot
     ]);
   }
