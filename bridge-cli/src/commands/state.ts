@@ -29,10 +29,22 @@ function formatDeposit(deposit: L1ToL2DepositMessage) {
   };
 }
 
+export interface StateResult {
+  contractAddress: string;
+  network: string;
+  nextCrossDomainMessageIndex: string;
+  lastCommittedBatchIndex: string;
+  lastCommittedBatchHash: string | null;
+  lastFinalizedBatchIndex: string;
+  lastFinalizedBatchHash: string | null;
+  rollingHashAtLatestIndex: string | null;
+  deposits: Record<string, ReturnType<typeof formatDeposit>>;
+}
+
 export async function runState(
   cliConfig: CliConfig,
-  opts: { json?: boolean },
-): Promise<void> {
+  opts: { json?: boolean; skipPrint?: boolean },
+): Promise<StateResult> {
   const { config, contractAddress, networkLabel } = cliConfig;
   const provider = indexerPublicDataProvider(config.indexer, config.indexerWS);
 
@@ -61,30 +73,34 @@ export async function runState(
     rollingHashAtNextIndex = ledger.L1_messageRollingHashes.lookup(rollingHashIndex);
   }
 
-  if (opts.json) {
-    const deposits: Record<string, ReturnType<typeof formatDeposit>> = {};
-    for (let idx = 0n; idx < nextIndex; idx += 1n) {
-      if (ledger.L1_l1ToL2Deposits.member(idx)) {
-        const deposit = ledger.L1_l1ToL2Deposits.lookup(idx);
-        deposits[idx.toString()] = formatDeposit(deposit);
-      }
+  const deposits: Record<string, ReturnType<typeof formatDeposit>> = {};
+  for (let idx = 0n; idx < nextIndex; idx += 1n) {
+    if (ledger.L1_l1ToL2Deposits.member(idx)) {
+      const deposit = ledger.L1_l1ToL2Deposits.lookup(idx);
+      deposits[idx.toString()] = formatDeposit(deposit);
     }
-    console.log(
-      JSON.stringify({
-        contractAddress,
-        network: networkLabel,
-        nextCrossDomainMessageIndex: nextIndex.toString(),
-        lastCommittedBatchIndex: lastCommittedBatchIndex.toString(),
-        lastCommittedBatchHash: lastCommittedBatchHash ? toHex(lastCommittedBatchHash) : null,
-        lastFinalizedBatchIndex: lastFinalizedBatchIndex.toString(),
-        lastFinalizedBatchHash: lastFinalizedBatchHash ? toHex(lastFinalizedBatchHash) : null,
-        rollingHashAtLatestIndex: rollingHashAtNextIndex
-          ? toHex(rollingHashAtNextIndex)
-          : null,
-        deposits,
-      }),
-    );
-    return;
+  }
+
+  const result: StateResult = {
+    contractAddress,
+    network: networkLabel,
+    nextCrossDomainMessageIndex: nextIndex.toString(),
+    lastCommittedBatchIndex: lastCommittedBatchIndex.toString(),
+    lastCommittedBatchHash: lastCommittedBatchHash ? toHex(lastCommittedBatchHash) : null,
+    lastFinalizedBatchIndex: lastFinalizedBatchIndex.toString(),
+    lastFinalizedBatchHash: lastFinalizedBatchHash ? toHex(lastFinalizedBatchHash) : null,
+    rollingHashAtLatestIndex: rollingHashAtNextIndex
+      ? toHex(rollingHashAtNextIndex)
+      : null,
+    deposits,
+  };
+
+  if (opts.json && !opts.skipPrint) {
+    console.log(JSON.stringify(result));
+    return result;
+  }
+  if (opts.skipPrint) {
+    return result;
   }
 
   console.log('Contract address:', contractAddress);
@@ -110,16 +126,14 @@ export async function runState(
   );
   console.log('---');
   console.log('L1 -> L2 deposits (0 → nextIndex-1):');
-  let total = 0;
-  for (let idx = 0n; idx < nextIndex; idx += 1n) {
-    if (!ledger.L1_l1ToL2Deposits.member(idx)) continue;
-    const deposit = ledger.L1_l1ToL2Deposits.lookup(idx);
-    console.log(`  ${idx.toString()}:`, formatDeposit(deposit));
-    total += 1;
-  }
+  const total = Object.keys(deposits).length;
   if (total === 0) {
     console.log('  (none)');
   } else {
+    for (const [idx, dep] of Object.entries(deposits)) {
+      console.log(`  ${idx}:`, dep);
+    }
     console.log(`Total: ${total} entries.`);
   }
+  return result;
 }

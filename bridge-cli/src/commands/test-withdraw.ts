@@ -18,6 +18,7 @@ import { type CliConfig, getWalletSeedFromEnv } from '../cli-config.js';
 import { createLogger } from '../logger.js';
 import { currentDir } from '../config.js';
 import type { BridgeProviders } from '../common-types.js';
+import type { ExecutorContext } from '../executor-context.js';
 import {
   buildBatchPublicData,
   buildSignatureVector,
@@ -49,6 +50,21 @@ export interface TestWithdrawOptions {
   json?: boolean;
 }
 
+export interface TestWithdrawResult {
+  setVerifierSetTxHash: string | null;
+  depositTxHash: string;
+  finalizeTxHash: string;
+  relayTxHash: string;
+  claimTxHash: string;
+  recipient: string;
+  depositAmount: string;
+  withdrawAmount: string;
+  claimAmount: string;
+  pendingAfterClaim: string;
+  expectedRemainder: string;
+  status: string;
+}
+
 function logProgress(message: string): void {
   console.error(`[test-withdraw] ${message}`);
 }
@@ -69,9 +85,9 @@ function computeIndexBits(index: bigint, depth = WITHDRAW_TREE_DEPTH): boolean[]
   return bits;
 }
 
-function buildWithdrawLeaves(leafIndex: number, leaf: Uint8Array): Uint8Array[] {
+function buildWithdrawLeaves(leafIndex: number, leaf: Uint8Array): Uint8Array<ArrayBuffer>[] {
   const leaves = Array.from({ length: leafIndex + 1 }, () => new Uint8Array(32));
-  leaves[leafIndex] = leaf;
+  leaves[leafIndex] = new Uint8Array(leaf);
   return leaves;
 }
 
@@ -143,7 +159,11 @@ async function waitForPendingWithdrawal(
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-export async function runTestWithdraw(cliConfig: CliConfig, opts: TestWithdrawOptions): Promise<void> {
+export async function runTestWithdraw(
+  cliConfig: CliConfig,
+  opts: TestWithdrawOptions,
+  executorContext?: ExecutorContext,
+): Promise<TestWithdrawResult> {
   const { config, contractAddress } = cliConfig;
   const gasLimit = opts.gasLimit !== undefined ? BigInt(opts.gasLimit) : 120_000n;
   const timestamp = opts.timestamp !== undefined ? BigInt(opts.timestamp) : 0n;
@@ -158,19 +178,21 @@ export async function runTestWithdraw(cliConfig: CliConfig, opts: TestWithdrawOp
     throw new Error('--wait-delay-ms must be a positive integer');
   }
 
-  const walletSeed = getWalletSeedFromEnv();
-  const logPath = path.resolve(
-    currentDir,
-    '..',
-    'logs',
-    'bridge-cli',
-    `${new Date().toISOString()}.log`,
-  );
-  const logger = await createLogger(logPath);
-  api.setLogger(logger);
-
   let walletContext: api.WalletContext | null = null;
-  try {
+  let providers = executorContext?.providers;
+  let bridgeContract = executorContext?.bridgeContract;
+
+  if (!providers || !bridgeContract) {
+    const walletSeed = getWalletSeedFromEnv();
+    const logPath = path.resolve(
+      currentDir,
+      '..',
+      'logs',
+      'bridge-cli',
+      `${new Date().toISOString()}.log`,
+    );
+    const logger = await createLogger(logPath);
+    api.setLogger(logger);
     const isHex =
       /^[0-9a-fA-F]{64}$/.test(walletSeed) ||
       /^0x[0-9a-fA-F]+$/.test(walletSeed);
@@ -179,15 +201,18 @@ export async function runTestWithdraw(cliConfig: CliConfig, opts: TestWithdrawOp
     } else {
       walletContext = await api.buildWalletAndWaitForFunds(config, walletSeed);
     }
-    const providers = await api.configureProviders(walletContext, config);
-    if (!providers.walletProvider) {
-      throw new Error('Wallet provider is not available');
-    }
-    if (!providers.publicDataProvider) {
-      throw new Error('Public data provider is not available');
-    }
-    const publicDataProvider = providers.publicDataProvider;
-    const bridgeContract = await api.joinContract(providers, contractAddress);
+    providers = await api.configureProviders(walletContext, config);
+    bridgeContract = await api.joinContract(providers, contractAddress);
+  }
+
+  if (!providers.walletProvider) {
+    throw new Error('Wallet provider is not available');
+  }
+  if (!providers.publicDataProvider) {
+    throw new Error('Public data provider is not available');
+  }
+  const publicDataProvider = providers.publicDataProvider;
+  try {
     const bridgeAddress = bridgeContract.deployTxData.public.contractAddress;
     const circuitContract = new Bridge.Contract<BridgePrivateState>(witnesses);
 
@@ -203,7 +228,8 @@ export async function runTestWithdraw(cliConfig: CliConfig, opts: TestWithdrawOp
     if (bridgeLedger === null) {
       throw new Error(`Bridge state not found for ${contractAddress}`);
     }
-    const balanceBefore = await getUnshieldedBalance(walletContext);
+    const walletCtx = executorContext?.walletContext ?? walletContext!;
+    const balanceBefore = await getUnshieldedBalance(walletCtx);
     let depositAmount = opts.depositAmount ? BigInt(opts.depositAmount) : resolveDepositAmount(balanceBefore);
     if (depositAmount < 4n) {
       depositAmount = 4n;
@@ -361,24 +387,23 @@ export async function runTestWithdraw(cliConfig: CliConfig, opts: TestWithdrawOp
       waitDelayMs,
     );
 
-    if (opts.json) {
-      console.log(
-        JSON.stringify({
-          setVerifierSetTxHash,
-          depositTxHash: depositTx.public.txHash,
-          finalizeTxHash: finalizeTx.public.txHash,
-          relayTxHash: relayTx.public.txHash,
-          claimTxHash: claimTx.public.txHash,
-          recipient: Buffer.from(recipientAddress).toString('hex'),
-          depositAmount: depositAmount.toString(),
-          withdrawAmount: withdrawAmount.toString(),
-          claimAmount: claimAmount.toString(),
-          pendingAfterClaim: pendingAfterClaim.toString(),
-          expectedRemainder: expectedRemainder.toString(),
-          status: 'completed',
-        }),
-      );
-    } else {
+    const result: TestWithdrawResult = {
+      setVerifierSetTxHash,
+      depositTxHash: depositTx.public.txHash,
+      finalizeTxHash: finalizeTx.public.txHash,
+      relayTxHash: relayTx.public.txHash,
+      claimTxHash: claimTx.public.txHash,
+      recipient: Buffer.from(recipientAddress).toString('hex'),
+      depositAmount: depositAmount.toString(),
+      withdrawAmount: withdrawAmount.toString(),
+      claimAmount: claimAmount.toString(),
+      pendingAfterClaim: pendingAfterClaim.toString(),
+      expectedRemainder: expectedRemainder.toString(),
+      status: 'completed',
+    };
+    if (!executorContext && opts.json) {
+      console.log(JSON.stringify(result));
+    } else if (!executorContext) {
       console.log('setVerifierSet txHash:', setVerifierSetTxHash ?? '(skipped)');
       console.log('depositNIGHTUnshielded txHash:', depositTx.public.txHash);
       console.log('finalizeBatch txHash:', finalizeTx.public.txHash);
@@ -386,6 +411,7 @@ export async function runTestWithdraw(cliConfig: CliConfig, opts: TestWithdrawOp
       console.log('claimL1WithdrawalUnshielded txHash:', claimTx.public.txHash);
       console.log('pending withdrawal after claim:', pendingAfterClaim.toString());
     }
+    return result;
   } finally {
     if (walletContext) {
       await api.closeWallet(walletContext);

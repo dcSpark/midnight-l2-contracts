@@ -6,11 +6,19 @@ import { type CliConfig, getWalletSeedFromEnv } from '../cli-config.js';
 import { createLogger } from '../logger.js';
 import path from 'node:path';
 import { currentDir } from '../config.js';
+import type { ExecutorContext } from '../executor-context.js';
 
 export interface ClaimL1WithdrawalUnshieldedOptions {
   recipient: string; // hex 32 bytes (64 hex chars)
   amount: string;   // decimal string
   json?: boolean;
+}
+
+export interface ClaimL1WithdrawalUnshieldedResult {
+  txHash: string;
+  recipient: string;
+  amount: string;
+  status: string;
 }
 
 function hexToBytes32(hex: string): Uint8Array {
@@ -24,7 +32,8 @@ function hexToBytes32(hex: string): Uint8Array {
 export async function runClaimL1WithdrawalUnshielded(
   cliConfig: CliConfig,
   opts: ClaimL1WithdrawalUnshieldedOptions,
-): Promise<void> {
+  executorContext?: ExecutorContext,
+): Promise<ClaimL1WithdrawalUnshieldedResult> {
   const { config, contractAddress } = cliConfig;
   const recipient = hexToBytes32(opts.recipient);
   const amount = BigInt(opts.amount);
@@ -32,19 +41,21 @@ export async function runClaimL1WithdrawalUnshielded(
     throw new Error('--amount must be positive');
   }
 
-  const walletSeed = getWalletSeedFromEnv();
-  const logPath = path.resolve(
-    currentDir,
-    '..',
-    'logs',
-    'bridge-cli',
-    `${new Date().toISOString()}.log`,
-  );
-  const logger = await createLogger(logPath);
-  api.setLogger(logger);
-
   let walletContext: api.WalletContext | null = null;
-  try {
+  let providers = executorContext?.providers;
+  let bridgeContract = executorContext?.bridgeContract;
+
+  if (!providers || !bridgeContract) {
+    const walletSeed = getWalletSeedFromEnv();
+    const logPath = path.resolve(
+      currentDir,
+      '..',
+      'logs',
+      'bridge-cli',
+      `${new Date().toISOString()}.log`,
+    );
+    const logger = await createLogger(logPath);
+    api.setLogger(logger);
     const isHex =
       /^[0-9a-fA-F]{64}$/.test(walletSeed) ||
       /^0x[0-9a-fA-F]+$/.test(walletSeed);
@@ -54,27 +65,28 @@ export async function runClaimL1WithdrawalUnshielded(
     } else {
       walletContext = await api.buildWalletAndWaitForFunds(config, walletSeed);
     }
-    const providers = await api.configureProviders(walletContext, config);
-    const bridgeContract = await api.joinContract(providers, contractAddress);
+    providers = await api.configureProviders(walletContext, config);
+    bridgeContract = await api.joinContract(providers, contractAddress);
+  }
 
+  try {
     const tx = await bridgeContract.callTx.claimL1WithdrawalUnshielded(
       recipient,
       amount,
     );
     const txHash = tx.public.txHash;
-
-    if (opts.json) {
-      console.log(
-        JSON.stringify({
-          txHash,
-          recipient: opts.recipient,
-          amount: opts.amount,
-          status: 'submitted',
-        }),
-      );
-    } else {
+    const result: ClaimL1WithdrawalUnshieldedResult = {
+      txHash,
+      recipient: opts.recipient,
+      amount: opts.amount,
+      status: 'submitted',
+    };
+    if (!executorContext && opts.json) {
+      console.log(JSON.stringify(result));
+    } else if (!executorContext) {
       console.log('claimL1WithdrawalUnshielded txHash:', txHash);
     }
+    return result;
   } finally {
     if (walletContext) {
       await api.closeWallet(walletContext);

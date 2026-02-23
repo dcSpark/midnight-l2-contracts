@@ -7,6 +7,7 @@ use crate::bridge::batch;
 use crate::bridge::ledger::BridgeLedger;
 use crate::cli::TestWithdrawArgs;
 use crate::commands::decode::load_bridge_ledger;
+use crate::executor_client;
 use crate::ts_cli;
 
 const WITHDRAW_TREE_DEPTH: usize = 16;
@@ -185,6 +186,8 @@ fn log_progress(message: &str) {
 
 pub async fn run(args: TestWithdrawArgs) -> Result<()> {
     ts_cli::validate_contract_address(&args.bridge.contract)?;
+
+    let executor_base = args.bridge.executor_url.as_deref();
     let env_args = ts_cli::TsCliEnvVars::from_bridge_call(&args.bridge);
 
     let gas_limit: u64 = match &args.gas_limit {
@@ -247,17 +250,32 @@ pub async fn run(args: TestWithdrawArgs) -> Result<()> {
 
     if !args.skip_set_verifier_set {
         log_progress("sending setVerifierSet...");
-        ts_cli::run_set_verifier_set(&env_args)?;
+        if let Some(base) = executor_base {
+            executor_client::set_verifier_set(base).await?;
+        } else {
+            ts_cli::run_set_verifier_set(&env_args)?;
+        }
     }
 
     log_progress("sending depositNIGHTUnshielded...");
-    ts_cli::run_deposit(
-        &env_args,
-        &deposit_amount.to_string(),
-        args.l2_recipient.as_deref(),
-        Some(&gas_limit.to_string()),
-        Some(&timestamp.to_string()),
-    )?;
+    if let Some(base) = executor_base {
+        executor_client::deposit(
+            base,
+            &deposit_amount.to_string(),
+            args.l2_recipient.as_deref(),
+            Some(&gas_limit.to_string()),
+            Some(&timestamp.to_string()),
+        )
+        .await?;
+    } else {
+        ts_cli::run_deposit(
+            &env_args,
+            &deposit_amount.to_string(),
+            args.l2_recipient.as_deref(),
+            Some(&gas_limit.to_string()),
+            Some(&timestamp.to_string()),
+        )?;
+    }
 
     log_progress("waiting for locked_night update...");
     let post_deposit_ledger = wait_for_ledger(
@@ -304,11 +322,20 @@ pub async fn run(args: TestWithdrawArgs) -> Result<()> {
             .ok_or_else(|| anyhow!("missing parent committed batch at index {}", parent_index))?;
         let new_batch_hash = batch::random_bytes32();
         log_progress("sending commitBatch...");
-        ts_cli::run_commit_batch(
-            &env_args,
-            &hex::encode(parent_hash),
-            &hex::encode(new_batch_hash),
-        )?;
+        if let Some(base) = executor_base {
+            executor_client::commit_batch(
+                base,
+                &hex::encode(parent_hash),
+                &hex::encode(new_batch_hash),
+            )
+            .await?;
+        } else {
+            ts_cli::run_commit_batch(
+                &env_args,
+                &hex::encode(parent_hash),
+                &hex::encode(new_batch_hash),
+            )?;
+        }
         wait_for_ledger(
             &args.bridge,
             args.wait_attempts,
@@ -325,20 +352,35 @@ pub async fn run(args: TestWithdrawArgs) -> Result<()> {
         batch::build_batch_public_data(&ledger_for_batch, batch_hash)?;
     batch_public_data.withdraw_root = withdraw_root;
     let batch_public_data_json = ts_cli::batch_public_data_to_json(&batch_public_data);
-    let signatures_json = ts_cli::build_signatures_json_from_batch(
-        &env_args,
-        &batch_public_data_json,
-        args.signature_max_nonce,
-    )?;
+    let signatures_json = if let Some(base) = executor_base {
+        executor_client::build_signatures(base, &batch_public_data_json, args.signature_max_nonce).await?
+    } else {
+        ts_cli::build_signatures_json_from_batch(
+            &env_args,
+            &batch_public_data_json,
+            args.signature_max_nonce,
+        )?
+    };
 
     log_progress("sending finalizeBatch...");
-    ts_cli::run_finalize_batch(
-        &env_args,
-        &batch_public_data_json,
-        &signatures_json,
-        signer_bitmap,
-        finalize_timestamp,
-    )?;
+    if let Some(base) = executor_base {
+        executor_client::finalize_batch(
+            base,
+            &batch_public_data_json,
+            &signatures_json,
+            signer_bitmap,
+            finalize_timestamp,
+        )
+        .await?;
+    } else {
+        ts_cli::run_finalize_batch(
+            &env_args,
+            &batch_public_data_json,
+            &signatures_json,
+            signer_bitmap,
+            finalize_timestamp,
+        )?;
+    }
 
     log_progress("waiting for last_finalized_batch_index update...");
     wait_for_ledger(
@@ -357,16 +399,30 @@ pub async fn run(args: TestWithdrawArgs) -> Result<()> {
         .map_err(|e| anyhow!("failed to serialize index_bits json: {e}"))?;
 
     log_progress("sending relayWithdrawNIGHTWithProof...");
-    ts_cli::run_relay_withdraw_night_with_proof(
-        &env_args,
-        &hex::encode(l2_sender),
-        &hex::encode(recipient_address),
-        &withdraw_amount.to_string(),
-        &batch_public_data.batch_index.to_string(),
-        &withdraw_nonce.to_string(),
-        &index_bits_json,
-        &siblings_json,
-    )?;
+    if let Some(base) = executor_base {
+        executor_client::relay_withdraw_night_with_proof(
+            base,
+            &hex::encode(l2_sender),
+            &hex::encode(recipient_address),
+            &withdraw_amount.to_string(),
+            &batch_public_data.batch_index.to_string(),
+            &withdraw_nonce.to_string(),
+            &index_bits_json,
+            &siblings_json,
+        )
+        .await?;
+    } else {
+        ts_cli::run_relay_withdraw_night_with_proof(
+            &env_args,
+            &hex::encode(l2_sender),
+            &hex::encode(recipient_address),
+            &withdraw_amount.to_string(),
+            &batch_public_data.batch_index.to_string(),
+            &withdraw_nonce.to_string(),
+            &index_bits_json,
+            &siblings_json,
+        )?;
+    }
 
     log_progress("waiting for pending withdrawal after relay...");
     wait_for_ledger(
@@ -387,11 +443,20 @@ pub async fn run(args: TestWithdrawArgs) -> Result<()> {
     .await?;
 
     log_progress("sending claimL1WithdrawalUnshielded...");
-    ts_cli::run_claim_l1_withdrawal_unshielded(
-        &env_args,
-        &hex::encode(recipient_address),
-        &claim_amount.to_string(),
-    )?;
+    if let Some(base) = executor_base {
+        executor_client::claim_l1_withdrawal_unshielded(
+            base,
+            &hex::encode(recipient_address),
+            &claim_amount.to_string(),
+        )
+        .await?;
+    } else {
+        ts_cli::run_claim_l1_withdrawal_unshielded(
+            &env_args,
+            &hex::encode(recipient_address),
+            &claim_amount.to_string(),
+        )?;
+    }
 
     log_progress("waiting for pending withdrawal remainder...");
     let after_claim = wait_for_ledger(

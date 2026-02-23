@@ -8,6 +8,7 @@ import * as api from '../api.js';
 import { type CliConfig, getWalletSeedFromEnv } from '../cli-config.js';
 import { currentDir } from '../config.js';
 import { createLogger } from '../logger.js';
+import type { ExecutorContext } from '../executor-context.js';
 
 export interface DepositOptions {
   /** Amount in NIGHT (decimal string). */
@@ -22,6 +23,14 @@ export interface DepositOptions {
   json?: boolean;
 }
 
+export interface DepositResult {
+  txHash: string;
+  amount: string;
+  gasLimit: string;
+  timestamp: string;
+  status: string;
+}
+
 function hexToBytes32(hex: string): Uint8Array {
   const s = hex.replace(/^0x/, '').trim();
   if (s.length !== 64 || !/^[0-9a-fA-F]+$/.test(s)) {
@@ -30,7 +39,11 @@ function hexToBytes32(hex: string): Uint8Array {
   return new Uint8Array(Buffer.from(s, 'hex'));
 }
 
-export async function runDeposit(cliConfig: CliConfig, opts: DepositOptions): Promise<void> {
+export async function runDeposit(
+  cliConfig: CliConfig,
+  opts: DepositOptions,
+  executorContext?: ExecutorContext,
+): Promise<DepositResult> {
   const { config, contractAddress } = cliConfig;
 
   const amount = BigInt(opts.amount);
@@ -40,13 +53,15 @@ export async function runDeposit(cliConfig: CliConfig, opts: DepositOptions): Pr
   const gasLimit = opts.gasLimit !== undefined ? BigInt(opts.gasLimit) : 100_000n;
   const timestamp = opts.timestamp !== undefined ? BigInt(opts.timestamp) : 0n;
 
-  const walletSeed = getWalletSeedFromEnv();
-  const logPath = path.resolve(currentDir, '..', 'logs', 'bridge-cli', `${new Date().toISOString()}.log`);
-  const logger = await createLogger(logPath);
-  api.setLogger(logger);
-
   let walletContext: api.WalletContext | null = null;
-  try {
+  let providers = executorContext?.providers;
+  let bridgeContract = executorContext?.bridgeContract;
+
+  if (!providers || !bridgeContract) {
+    const logPath = path.resolve(currentDir, '..', 'logs', 'bridge-cli', `${new Date().toISOString()}.log`);
+    const logger = await createLogger(logPath);
+    api.setLogger(logger);
+    const walletSeed = getWalletSeedFromEnv();
     const isHex =
       /^[0-9a-fA-F]{64}$/.test(walletSeed) || /^0x[0-9a-fA-F]+$/.test(walletSeed);
     if (isHex) {
@@ -55,8 +70,11 @@ export async function runDeposit(cliConfig: CliConfig, opts: DepositOptions): Pr
     } else {
       walletContext = await api.buildWalletAndWaitForFunds(config, walletSeed);
     }
-    const providers = await api.configureProviders(walletContext, config);
+    providers = await api.configureProviders(walletContext, config);
+    bridgeContract = await api.joinContract(providers, contractAddress);
+  }
 
+  try {
     let l2Recipient: Uint8Array;
     if (opts.l2Recipient !== undefined) {
       l2Recipient = hexToBytes32(opts.l2Recipient);
@@ -71,7 +89,6 @@ export async function runDeposit(cliConfig: CliConfig, opts: DepositOptions): Pr
       l2Recipient = encodeCoinPublicKey(coinPublicKey);
     }
 
-    const bridgeContract = await api.joinContract(providers, contractAddress);
     const tx = await bridgeContract.callTx.depositNIGHTUnshielded(
       amount,
       l2Recipient,
@@ -79,20 +96,19 @@ export async function runDeposit(cliConfig: CliConfig, opts: DepositOptions): Pr
       timestamp,
     );
     const txHash = tx.public.txHash;
-
-    if (opts.json) {
-      console.log(
-        JSON.stringify({
-          txHash,
-          amount: opts.amount,
-          gasLimit: gasLimit.toString(),
-          timestamp: timestamp.toString(),
-          status: 'submitted',
-        }),
-      );
-    } else {
+    const result: DepositResult = {
+      txHash,
+      amount: opts.amount,
+      gasLimit: gasLimit.toString(),
+      timestamp: timestamp.toString(),
+      status: 'submitted',
+    };
+    if (!executorContext && opts.json) {
+      console.log(JSON.stringify(result));
+    } else if (!executorContext) {
       console.log('depositNIGHTUnshielded txHash:', txHash);
     }
+    return result;
   } finally {
     if (walletContext) {
       await api.closeWallet(walletContext);

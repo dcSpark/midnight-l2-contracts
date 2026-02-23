@@ -71,6 +71,10 @@ pub struct BridgeCallArgs {
     /// Bridge artifacts directory (contains keys/ and zkir/).
     #[arg(long, env = "BRIDGE_ARTIFACTS", default_value = "../../bridge-contract/dist/managed/Bridge")]
     pub bridge_artifacts: String,
+
+    /// Executor service URL (e.g. http://127.0.0.1:3000). When set, bridge actions are sent via HTTP instead of TS subprocess.
+    #[arg(long, env = "EXECUTOR_URL")]
+    pub executor_url: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
