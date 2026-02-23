@@ -7,7 +7,6 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": "./dist/cli.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,13 +16,12 @@
     }
   },
   "scripts": {
-    "cli": "tsx src/cli.ts",
     "test-undeployed": "vitest --no-file-parallelism run",
     "test-preview": "RUN_ENV_TESTS=true TEST_ENV=preview vitest run",
     "tui-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/tui_standalone.ts",
     "tui-preview": "npx --yes tsx --tsconfig tsconfig.json src/tui_preview.ts",
     "setup-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/setup/standalone.ts",
-    "deploy-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/cli.ts deploy -n undeployed",
+    "deploy-undeployed": "npx --yes tsx --tsconfig tsconfig.json src/deploy-undeployed.ts",
     "ps-undeployed": "docker compose -f ps-undeployed.yml up",
     "ps-preview": "docker compose -f ps-preview.yml up",
     "build": "rm -rf dist && tsc --project tsconfig.build.json",
@@ -31,7 +29,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "bridge-contract": "*",
-    "commander": "^14.0.3"
+    "bridge-contract": "*"
   }
 }

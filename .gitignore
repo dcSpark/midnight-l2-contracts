@@ -63,10 +63,3 @@ managed/
 frontend-vite-react/public
 
 .cache
-
-# Helper repos for AI agents
-example-counter/
-midnight-docs/
-midnight-indexer/
-midnight-ledger/
-midnight-node/

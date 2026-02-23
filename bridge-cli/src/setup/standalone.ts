@@ -15,21 +15,15 @@ async function setupStandalone() {
   await testEnvironment.start();
   const wallet = await testEnvironment.getWallet();
 
-  const address = process.env.MY_UNDEPLOYED_UNSHIELDED_ADDRESS?.trim();
-  if (address) {
-    try {
-      const result = await sendArbitraryUnshieldedToken(wallet, address, 1000000000n);
-      logger.info(`address keystore ${wallet.unshieldedKeystore.getAddress()}`);
-      logger.info(result);
-    } catch (error) {
-      const decoded = api.decodeRpcError(error);
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ error: err, decoded }, 'Setup failed');
-    }
-  } else {
-    logger.info(
-      'MY_UNDEPLOYED_UNSHIELDED_ADDRESS not set; skipping test transfer. Set it in .env to send a test transfer to that address.',
-    );
+  try {
+    const address = process.env.MY_UNDEPLOYED_UNSHIELDED_ADDRESS!;
+    const result = await sendArbitraryUnshieldedToken(wallet, address, 1000000000n);
+    logger.info(`address keystore ${wallet.unshieldedKeystore.getAddress()}`);
+    logger.info(result);
+  } catch (error) {
+    const decoded = api.decodeRpcError(error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error({ error: err, decoded }, 'Setup failed');
   }
   // Keep the process running forever
   logger.info('Setup complete. Keeping container alive forever...');

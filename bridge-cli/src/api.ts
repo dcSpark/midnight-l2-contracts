@@ -12,8 +12,8 @@ import {
   type BridgeContract,
   type BridgeProviders,
   type DeployedBridgeContract,
-} from './common-types.js';
-import { contractConfig, type Config } from './config.js';
+} from './common-types';
+import { contractConfig, type Config } from './config';
 
 import {
   createCircuitContext,
@@ -58,7 +58,7 @@ import {
   UnshieldedWallet,
   type UnshieldedKeystore,
 } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
-import { mnemonicToSeed } from './test/utils/utils.js';
+import { mnemonicToSeed } from './test/utils/utils';
 
 let logger: Logger;
 
@@ -396,7 +396,7 @@ export const joinContract = async (
   providers: BridgeProviders,
   contractAddress: string,
 ): Promise<DeployedBridgeContract> => {
-  logger.info(`Finding deployed contract: ${contractAddress}`);
+  logger.info(`FInding eployed contract: ${contractAddress}`);
   assertIsContractAddress(contractAddress);
   const bridgeContract = await findDeployedContract(providers, {
     contractAddress,
@@ -503,15 +503,15 @@ export const createWalletAndMidnightProvider = async (
   walletContext: WalletContext,
 ): Promise<WalletProvider & MidnightProvider> => {
   const state = await Rx.firstValueFrom(walletContext.wallet.state().pipe(Rx.filter((s) => s.isSynced)));
-  logger.debug({
+  logger.info({
     section: 'DUST Wallet State',
     dust: state.dust,
   });
-  logger.debug({
+  logger.info({
     section: 'Shielded Wallet State',
     shielded: state.shielded,
   });
-  logger.debug({
+  logger.info({
     section: 'Unshielded Wallet State',
     unshielded: state.unshielded,
   });

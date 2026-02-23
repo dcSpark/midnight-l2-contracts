@@ -999,7 +999,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dotenvy",
  "hex",
  "midnight-base-crypto 1.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
  "midnight-ledger 7.0.1",
