@@ -1,5 +1,9 @@
 pub mod commit_batch;
+pub mod claim_l1_withdrawal;
 pub mod decode;
 pub mod deposit;
 pub mod finalize_batch;
+pub mod relay_withdraw_night_with_proof;
+pub mod set_verifier_set;
+pub mod test_withdraw;
 mod mock_batch;

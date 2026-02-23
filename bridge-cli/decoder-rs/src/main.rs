@@ -22,5 +22,11 @@ async fn main() -> Result<()> {
         cli::CommandKind::CommitBatch(args) => commands::commit_batch::run(args).await,
         cli::CommandKind::FinalizeBatch(args) => commands::finalize_batch::run(args).await,
         cli::CommandKind::Deposit(args) => commands::deposit::run(args),
+        cli::CommandKind::SetVerifierSet(args) => commands::set_verifier_set::run(args),
+        cli::CommandKind::RelayWithdrawNightWithProof(args) => {
+            commands::relay_withdraw_night_with_proof::run(args)
+        }
+        cli::CommandKind::ClaimL1Withdrawal(args) => commands::claim_l1_withdrawal::run(args),
+        cli::CommandKind::TestWithdraw(args) => commands::test_withdraw::run(args).await,
     }
 }

@@ -342,10 +342,11 @@ export async function runTestWithdraw(cliConfig: CliConfig, opts: TestWithdrawOp
       waitDelayMs,
     );
 
-    const balanceBeforeClaim = await getUnshieldedBalance(walletContext);
+    //const balanceBeforeClaim = await getUnshieldedBalance(walletContext);
     logProgress('Sending claimL1WithdrawalUnshielded transaction...');
     const claimTx = await bridgeContract.callTx.claimL1WithdrawalUnshielded(recipientAddress, claimAmount);
     logProgress(`claimL1WithdrawalUnshielded submitted: ${claimTx.public.txHash}`);
+    // TODO: uncomment when ledger-v8 is used
     // logProgress('Waiting for unshielded balance increase after claim...');
     // await waitForUnshieldedBalance(walletContext, (balance) => balance >= balanceBeforeClaim + claimAmount);
 

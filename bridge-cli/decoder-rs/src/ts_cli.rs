@@ -203,6 +203,81 @@ pub fn run_deposit(
     }
 }
 
+/// Run `bridge-cli set-verifier-set`.
+pub fn run_set_verifier_set(env_args: &TsCliEnvVars) -> Result<()> {
+    let args = ["set-verifier-set", "--contract", env_args.contract.as_str()];
+    let status = run_bridge_cli_cmd(&args, env_args)?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("bridge-cli set-verifier-set exited with {}", status)
+    }
+}
+
+/// Run `bridge-cli relay-withdraw-night-with-proof`.
+pub fn run_relay_withdraw_night_with_proof(
+    env_args: &TsCliEnvVars,
+    l2_sender: &str,
+    recipient: &str,
+    amount: &str,
+    batch_index: &str,
+    nonce: &str,
+    index_bits_json: &str,
+    siblings_json: &str,
+) -> Result<()> {
+    let args = [
+        "relay-withdraw-night-with-proof",
+        "--contract",
+        env_args.contract.as_str(),
+        "--l2-sender",
+        l2_sender,
+        "--recipient",
+        recipient,
+        "--amount",
+        amount,
+        "--batch-index",
+        batch_index,
+        "--nonce",
+        nonce,
+        "--index-bits",
+        index_bits_json,
+        "--siblings",
+        siblings_json,
+    ];
+    let status = run_bridge_cli_cmd(&args, env_args)?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("bridge-cli relay-withdraw-night-with-proof exited with {}", status)
+    }
+}
+
+/// Run `bridge-cli claim-l1-withdrawal-unshielded`.
+pub fn run_claim_l1_withdrawal_unshielded(
+    env_args: &TsCliEnvVars,
+    recipient: &str,
+    amount: &str,
+) -> Result<()> {
+    let args = [
+        "claim-l1-withdrawal-unshielded",
+        "--contract",
+        env_args.contract.as_str(),
+        "--recipient",
+        recipient,
+        "--amount",
+        amount,
+    ];
+    let status = run_bridge_cli_cmd(&args, env_args)?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "bridge-cli claim-l1-withdrawal-unshielded exited with {}",
+            status
+        )
+    }
+}
+
 /// Build signatures JSON via TS batch-helpers to match contract/browser pure circuits exactly.
 pub fn build_signatures_json_from_batch(
     env_args: &TsCliEnvVars,
