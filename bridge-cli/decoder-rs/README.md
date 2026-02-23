@@ -7,6 +7,10 @@
   - `commit-batch` now builds a mock `BatchPublicDataV1Full`, derives `batchHash` from it, and writes the full batch to `.mock-batches/latest.json`.
   - `finalize-batch` now reads `.mock-batches/latest.json` and uses that payload to construct finalize inputs.
 - **deposit**: Delegates to TypeScript `bridge-cli deposit` (calls `depositNIGHTUnshielded`).
+- **set-verifier-set**: Delegates to TypeScript `bridge-cli set-verifier-set`.
+- **relay-withdraw-night-with-proof**: Delegates to TypeScript `bridge-cli relay-withdraw-night-with-proof`.
+- **claim-l1-withdrawal**: Delegates to TypeScript `bridge-cli claim-l1-withdrawal-unshielded`.
+- **test-withdraw**: End-to-end withdrawal workflow orchestration in Rust; low-level circuit calls are delegated to the TypeScript bridge-cli.
 
 ## Prerequisites
 
@@ -32,6 +36,29 @@ cargo run -- finalize-batch
 
 ```bash
 cargo run -- deposit --amount <decimal> [--l2-recipient <64_hex>] [--gas-limit <decimal>] [--timestamp <decimal>]
+```
+
+```bash
+cargo run -- set-verifier-set
+```
+
+```bash
+cargo run -- relay-withdraw-night-with-proof \
+  --l2-sender <64_hex> \
+  --recipient <64_hex> \
+  --amount <decimal> \
+  --batch-index <decimal> \
+  --nonce <decimal> \
+  --index-bits '<json_bool_array_len_16>' \
+  --siblings '<json_hex_array_len_16>'
+```
+
+```bash
+cargo run -- claim-l1-withdrawal --recipient <64_hex> --amount <decimal>
+```
+
+```bash
+cargo run -- test-withdraw
 ```
 
 ## Mock batch flow
@@ -86,6 +113,39 @@ PROOF_SERVER="http://127.0.0.1:6300" \
 BRIDGE_CONTRACT_ADDRESS="<64_hex_bridge_address>" \
 FUNDING_SEED="<wallet_seed_or_mnemonic>" \
 cargo run -- deposit --amount 100
+```
+
+Set verifier set (delegates to bridge-cli TS):
+
+```bash
+INDEXER_HTTP="http://127.0.0.1:8088/api/v3/graphql" \
+MIDNIGHT_NODE_WS="ws://127.0.0.1:9944" \
+PROOF_SERVER="http://127.0.0.1:6300" \
+BRIDGE_CONTRACT_ADDRESS="<64_hex_bridge_address>" \
+FUNDING_SEED="<wallet_seed_or_mnemonic>" \
+cargo run -- set-verifier-set
+```
+
+Claim L1 withdrawal (delegates to bridge-cli TS unshielded claim):
+
+```bash
+INDEXER_HTTP="http://127.0.0.1:8088/api/v3/graphql" \
+MIDNIGHT_NODE_WS="ws://127.0.0.1:9944" \
+PROOF_SERVER="http://127.0.0.1:6300" \
+BRIDGE_CONTRACT_ADDRESS="<64_hex_bridge_address>" \
+FUNDING_SEED="<wallet_seed_or_mnemonic>" \
+cargo run -- claim-l1-withdrawal --recipient "<64_hex_recipient>" --amount 10
+```
+
+Test withdrawal flow (Rust orchestration + TS low-level calls):
+
+```bash
+INDEXER_HTTP="http://127.0.0.1:8088/api/v3/graphql" \
+MIDNIGHT_NODE_WS="ws://127.0.0.1:9944" \
+PROOF_SERVER="http://127.0.0.1:6300" \
+BRIDGE_CONTRACT_ADDRESS="<64_hex_bridge_address>" \
+FUNDING_SEED="<wallet_seed_or_mnemonic>" \
+cargo run -- test-withdraw --deposit-amount 20 --wait-attempts 30 --wait-delay-ms 2000
 ```
 
 ## Environment Variables

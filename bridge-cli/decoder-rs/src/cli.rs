@@ -17,6 +17,10 @@ pub enum CommandKind {
     CommitBatch(BatchArgs),
     FinalizeBatch(BatchArgs),
     Deposit(DepositArgs),
+    SetVerifierSet(BridgeCallArgs),
+    RelayWithdrawNightWithProof(RelayWithdrawArgs),
+    ClaimL1Withdrawal(ClaimL1WithdrawalArgs),
+    TestWithdraw(TestWithdrawArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -99,4 +103,114 @@ pub struct DepositArgs {
     /// Optional message timestamp (decimal string). Default in TS CLI: 0.
     #[arg(long)]
     pub timestamp: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RelayWithdrawArgs {
+    #[command(flatten)]
+    pub bridge: BridgeCallArgs,
+
+    /// L2 sender bytes32 hex.
+    #[arg(long)]
+    pub l2_sender: String,
+
+    /// L1 recipient bytes32 hex.
+    #[arg(long)]
+    pub recipient: String,
+
+    /// Withdraw amount (decimal string).
+    #[arg(long)]
+    pub amount: String,
+
+    /// Proof batch index (decimal string).
+    #[arg(long)]
+    pub batch_index: String,
+
+    /// Proof nonce (decimal string).
+    #[arg(long)]
+    pub nonce: String,
+
+    /// Proof index bits as JSON bool array, length 16.
+    #[arg(long)]
+    pub index_bits: String,
+
+    /// Proof siblings as JSON bytes32-hex array, length 16.
+    #[arg(long)]
+    pub siblings: String,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ClaimL1WithdrawalArgs {
+    #[command(flatten)]
+    pub bridge: BridgeCallArgs,
+
+    /// Recipient bytes32 hex.
+    #[arg(long)]
+    pub recipient: String,
+
+    /// Claim amount (decimal string).
+    #[arg(long)]
+    pub amount: String,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct TestWithdrawArgs {
+    #[command(flatten)]
+    pub bridge: BridgeCallArgs,
+
+    /// Optional deposit amount. Default: derived from locked_night baseline (minimum 4).
+    #[arg(long)]
+    pub deposit_amount: Option<String>,
+
+    /// Optional withdraw amount. Default: deposit/2.
+    #[arg(long)]
+    pub withdraw_amount: Option<String>,
+
+    /// Optional claim amount. Default: withdraw-1 when possible.
+    #[arg(long)]
+    pub claim_amount: Option<String>,
+
+    /// Optional recipient bytes32 hex. Default: deterministic demo address.
+    #[arg(long)]
+    pub recipient: Option<String>,
+
+    /// Optional l2 sender bytes32 hex. Default: zero bytes.
+    #[arg(long)]
+    pub l2_sender: Option<String>,
+
+    /// Optional l2 recipient bytes32 hex for deposit.
+    #[arg(long)]
+    pub l2_recipient: Option<String>,
+
+    /// Optional gas limit for deposit. Default: 120000.
+    #[arg(long)]
+    pub gas_limit: Option<String>,
+
+    /// Optional timestamp for deposit. Default: 0.
+    #[arg(long)]
+    pub timestamp: Option<String>,
+
+    /// Optional signer bitmap for finalize. Default: 7.
+    #[arg(long)]
+    pub signer_bitmap: Option<u8>,
+
+    /// Optional finalize timestamp. Default: 0.
+    #[arg(long)]
+    pub finalize_timestamp: Option<u64>,
+
+    /// Skip set-verifier-set step.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub skip_set_verifier_set: bool,
+
+    /// Max nonce for signature scanning.
+    #[arg(long, env = "SIGNATURE_MAX_NONCE", default_value = "256")]
+    pub signature_max_nonce: u64,
+
+    /// Poll attempts for async checks.
+    #[arg(long, default_value = "20")]
+    pub wait_attempts: u32,
+
+    /// Poll delay in milliseconds.
+    #[arg(long, default_value = "3000")]
+    pub wait_delay_ms: u64,
 }
