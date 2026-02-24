@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 
 use crate::cli::RelayWithdrawArgs;
+use crate::executor_client;
 use crate::ts_cli;
 
 fn validate_hex32(label: &str, value: &str) -> Result<()> {
@@ -11,7 +12,7 @@ fn validate_hex32(label: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn run(args: RelayWithdrawArgs) -> Result<()> {
+pub async fn run(args: RelayWithdrawArgs) -> Result<()> {
     ts_cli::validate_contract_address(&args.bridge.contract)?;
     validate_hex32("--l2-sender", &args.l2_sender)?;
     validate_hex32("--recipient", &args.recipient)?;
@@ -46,6 +47,19 @@ pub fn run(args: RelayWithdrawArgs) -> Result<()> {
         validate_hex32(&format!("--siblings[{idx}]"), sibling)?;
     }
 
+    if let Some(ref base) = args.bridge.executor_url {
+        return executor_client::relay_withdraw_night_with_proof(
+            base,
+            &args.l2_sender,
+            &args.recipient,
+            &args.amount,
+            &args.batch_index,
+            &args.nonce,
+            &args.index_bits,
+            &args.siblings,
+        )
+        .await;
+    }
     let env_args = ts_cli::TsCliEnvVars::from_bridge_call(&args.bridge);
     ts_cli::run_relay_withdraw_night_with_proof(
         &env_args,

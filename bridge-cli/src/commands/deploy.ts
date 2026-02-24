@@ -7,6 +7,7 @@ import * as api from '../api.js';
 import { type DeployCliConfig, getWalletSeedFromEnv } from '../cli-config.js';
 import { createLogger } from '../logger.js';
 import { currentDir } from '../config.js';
+import type { ExecutorContext } from '../executor-context.js';
 
 export interface DeployOptions {
   /** Optional hex seed for deployer wallet (overrides env). */
@@ -15,29 +16,33 @@ export interface DeployOptions {
   json?: boolean;
 }
 
+export interface DeployResult {
+  contractAddress: string;
+  networkLabel: string;
+}
+
 export async function runDeploy(
   deployConfig: DeployCliConfig,
   opts: DeployOptions = {},
-): Promise<void> {
+  executorContext?: ExecutorContext,
+): Promise<DeployResult> {
   const { config, networkLabel } = deployConfig;
 
-  const logPath = path.resolve(
-    currentDir,
-    '..',
-    'logs',
-    'bridge-cli',
-    `${new Date().toISOString()}.log`,
-  );
-  const logger = await createLogger(logPath);
-  api.setLogger(logger);
-
-  const walletSeed =
-    opts.deployerSeed?.trim() ?? getWalletSeedFromEnv();
-
   let walletContext: api.WalletContext | null = null;
-  try {
-    logger.info(`Deploying bridge contract on ${networkLabel}...`);
+  let providers = executorContext?.providers;
 
+  if (!providers) {
+    const logPath = path.resolve(
+      currentDir,
+      '..',
+      'logs',
+      'bridge-cli',
+      `${new Date().toISOString()}.log`,
+    );
+    const logger = await createLogger(logPath);
+    api.setLogger(logger);
+    logger.info(`Deploying bridge contract on ${networkLabel}...`);
+    const walletSeed = opts.deployerSeed?.trim() ?? getWalletSeedFromEnv();
     const isHex =
       /^[0-9a-fA-F]{64}$/.test(walletSeed) ||
       /^0x[0-9a-fA-F]+$/.test(walletSeed);
@@ -47,23 +52,22 @@ export async function runDeploy(
     } else {
       walletContext = await api.buildWalletAndWaitForFunds(config, walletSeed);
     }
-    const providers = await api.configureProviders(walletContext, config);
+    providers = await api.configureProviders(walletContext, config);
+  }
+
+  try {
     const deployed = await api.deploy(providers, { privateState: 0 });
     const address = deployed.deployTxData.public.contractAddress;
-
-    logger.info(`Bridge deployed at: ${address}`);
-
-    if (opts.json) {
-      console.log(
-        JSON.stringify({
-          contractAddress: address,
-          networkLabel,
-        }),
-      );
-    } else {
-      process.stdout.write(`BRIDGE_ADDRESS=${address}\n`);
-      process.stdout.write(`VITE_CONTRACT_ADDRESS="${address}"\n`);
+    const result: DeployResult = { contractAddress: address, networkLabel };
+    if (!executorContext) {
+      if (opts.json) {
+        console.log(JSON.stringify(result));
+      } else {
+        process.stdout.write(`BRIDGE_ADDRESS=${address}\n`);
+        process.stdout.write(`VITE_CONTRACT_ADDRESS="${address}"\n`);
+      }
     }
+    return result;
   } finally {
     if (walletContext) {
       await api.closeWallet(walletContext);

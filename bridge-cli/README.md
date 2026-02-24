@@ -131,6 +131,75 @@ npm run cli -- finalize-batch-from-ledger
 npm run cli -- claim-l1-withdrawal-unshielded --recipient <64_hex> --amount <decimal>
 ```
 
+## Executor service
+
+The CLI can run as a **long-lived executor service** that builds and syncs the wallet once at startup, joins the contract, and exposes all transaction commands as HTTP endpoints. This avoids per-command wallet sync when the Rust CLI (or another client) calls it repeatedly.
+
+### Configuration
+
+Use the same environment variables as the one-shot CLI. The service resolves config at startup and keeps one wallet + contract join for the process lifetime.
+
+- **Required**: `BRIDGE_CONTRACT_ADDRESS`, `INDEXER_HTTP`, `MIDNIGHT_NODE_WS` (or `NODE_WS`), `PROOF_SERVER`, `FUNDING_SEED` (or `MY_PREVIEW_MNEMONIC`).
+- **Optional**: `INDEXER_WS`, `MIDNIGHT_NETWORK` (`preview` / `undeployed`), `BRIDGE_ARTIFACTS`, `SIGNATURE_MAX_NONCE`.
+
+Server binding:
+
+- **`EXECUTOR_PORT`** or **`PORT`** – Port to listen on (default: `3000`).
+- **`EXECUTOR_HOST`** – Host to bind (default: `0.0.0.0`).
+
+### Starting the service
+
+From the `bridge-cli` directory:
+
+```bash
+npm install
+# Set env (e.g. in .env or export)
+export BRIDGE_CONTRACT_ADDRESS="<64_hex>"
+export INDEXER_HTTP="http://127.0.0.1:8088/api/v3/graphql"
+export MIDNIGHT_NODE_WS="ws://127.0.0.1:9944"
+export PROOF_SERVER="http://127.0.0.1:6300"
+export FUNDING_SEED="<hex_or_mnemonic>"
+
+npm run executor
+```
+
+Or with explicit port and host:
+
+```bash
+EXECUTOR_PORT=3000 EXECUTOR_HOST=127.0.0.1 npm run executor
+```
+
+On startup the service:
+
+1. Resolves config from env.
+2. Builds the wallet (from `FUNDING_SEED` or mnemonic), waits for sync, configures providers, and joins the contract at `BRIDGE_CONTRACT_ADDRESS`.
+3. Starts the HTTP server. Once ready, `GET /health` and `GET /ready` return 200.
+
+On **SIGINT** or **SIGTERM** the service closes the wallet and exits.
+
+### Endpoints
+
+All request/response bodies are JSON. On error the response has status 4xx/5xx and a body `{ "error": "message" }`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health`, `/ready` | Health check; 200 when context is ready. |
+| GET | `/state` | Bridge state (same as CLI `state`). Response: state object. |
+| POST | `/commit-batch` | Body: `{ "parentHash", "batchHash" }`. |
+| POST | `/finalize-batch` | Body: `{ "batchPublicData", "signatures", "signerBitmap", "finalizeTimestamp" }`. |
+| POST | `/finalize-batch-from-ledger` | No body. Builds args from ledger and submits. |
+| POST | `/set-verifier-set` | No body. |
+| POST | `/claim-l1-withdrawal-unshielded` | Body: `{ "recipient", "amount" }`. |
+| POST | `/deposit` | Body: `{ "amount" }`; optional `l2Recipient`, `gasLimit`, `timestamp`. |
+| POST | `/relay-withdraw-night-with-proof` | Body: `l2Sender`, `recipient`, `amount`, `batchIndex`, `nonce`, `indexBits`, `siblings`. |
+| POST | `/test-withdraw` | Body: optional same options as CLI (e.g. `depositAmount`, `skipSetVerifierSet`, `waitAttempts`, `waitDelayMs`). |
+| POST | `/deploy` | Body: optional `{ "deployerSeed" }`. Deploys a new contract; service stays joined to the address it was started with. |
+| POST | `/build-signatures` | Body: `{ "batchPublicData" }` (object or JSON string), optional `signatureMaxNonce`. Returns `{ "signatures": "<JSON string>" }` for use in finalize-batch. |
+
+Success responses return the same shape as the CLI JSON output (e.g. `{ "txHash", "status" }`).
+
+---
+
 ## Calling from Rust (subprocess)
 
 Invoke the CLI with no stdin; pass all config via argv and env:
@@ -142,7 +211,7 @@ node path/to/bridge-cli/dist/cli.js commit-batch --contract <addr>
 
 Set `BRIDGE_CONTRACT_ADDRESS`, `INDEXER_HTTP`, `FUNDING_SEED`, etc. in the environment of the spawned process. Exit code 0 on success; non-zero and stderr on failure.
 
-A future `--output-tx=hex` flag may be added so that TS builds and proves the transaction but prints the finalized tx hex to stdout instead of submitting; Rust could then submit that hex (e.g. for retries or a different node).
+**Alternative: executor service.** Instead of spawning the CLI per command, start the executor service once (`npm run executor` in bridge-cli) and point the Rust CLI at it with `EXECUTOR_URL` or `--executor-url` (see decoder-rs README). The Rust CLI then calls the HTTP endpoints and avoids repeated wallet sync.
 
 ## Interactive TUI
 

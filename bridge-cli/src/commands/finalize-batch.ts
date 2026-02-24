@@ -24,6 +24,7 @@ import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-p
 import { createLogger } from '../logger.js';
 import path from 'node:path';
 import { currentDir } from '../config.js';
+import type { ExecutorContext } from '../executor-context.js';
 
 /** Options for runFinalizeBatch: the four required arguments to finalizeBatch. */
 export interface FinalizeBatchOptions {
@@ -32,6 +33,18 @@ export interface FinalizeBatchOptions {
   signerBitmap: bigint;
   finalizeTimestamp: bigint;
   json?: boolean;
+}
+
+export interface FinalizeBatchResult {
+  txHash: string;
+  batchIndex: string;
+  status: string;
+}
+
+export interface FinalizeBatchFromLedgerResult {
+  txHash: string;
+  batchIndex: string;
+  status: string;
 }
 
 /**
@@ -48,7 +61,7 @@ export async function getFinalizeBatchArgsFromLedger(
   signerBitmap: bigint;
   finalizeTimestamp: bigint;
 }> {
-  const result = await withLedgerAndBridgeContract(cliConfig, async (ctx) => {
+  const result = await withLedgerAndBridgeContract(cliConfig, undefined, async (ctx) => {
     const { contractState, ledger, batchHash } = ctx;
     const targetBatchIndex = ledger.L1_miscData.lastFinalizedBatchIndex + 1n;
     if (ledger.L1_miscData.lastCommittedBatchIndex < targetBatchIndex) {
@@ -81,8 +94,9 @@ export async function getFinalizeBatchArgsFromLedger(
 export async function runFinalizeBatchFromLedger(
   cliConfig: CliConfig,
   opts: { json?: boolean },
-): Promise<void> {
-  await withLedgerAndBridgeContract(cliConfig, async (ctx) => {
+  executorContext?: ExecutorContext,
+): Promise<FinalizeBatchFromLedgerResult> {
+  return withLedgerAndBridgeContract(cliConfig, executorContext, async (ctx) => {
     const { contractState, ledger, batchHash, bridgeContract } = ctx;
     const targetBatchIndex = ledger.L1_miscData.lastFinalizedBatchIndex + 1n;
     if (ledger.L1_miscData.lastCommittedBatchIndex < targetBatchIndex) {
@@ -109,25 +123,25 @@ export async function runFinalizeBatchFromLedger(
     );
     const txHash = tx.public.txHash;
     const batchIndexStr = batchPublicData.batchIndex.toString();
-
-    if (opts.json) {
-      console.log(
-        JSON.stringify({
-          txHash,
-          batchIndex: batchIndexStr,
-          status: 'submitted',
-        }),
-      );
-    } else {
+    const result: FinalizeBatchFromLedgerResult = {
+      txHash,
+      batchIndex: batchIndexStr,
+      status: 'submitted',
+    };
+    if (!executorContext && opts.json) {
+      console.log(JSON.stringify(result));
+    } else if (!executorContext) {
       console.log('finalizeBatch txHash:', txHash);
       console.log('batch index:', batchIndexStr);
     }
+    return result;
   });
 }
 
 /** Single wallet session: ensure pending batch, then run callback with (contractState, ledger, batchHash, bridgeContract, contract, contractAddress). */
 async function withLedgerAndBridgeContract<T>(
   cliConfig: CliConfig,
+  executorContext: ExecutorContext | undefined,
   fn: (ctx: {
     contractState: ContractState;
     ledger: BridgeLedger;
@@ -140,6 +154,29 @@ async function withLedgerAndBridgeContract<T>(
   const { config, contractAddress } = cliConfig;
   const provider = indexerPublicDataProvider(config.indexer, config.indexerWS);
   const contract = new Bridge.Contract<BridgePrivateState>(witnesses);
+
+  if (executorContext) {
+    const { providers, bridgeContract } = executorContext;
+    const poller = providers.publicDataProvider ?? provider;
+    if (!poller) throw new Error('Public data provider is not available');
+    const ensureParams: EnsureBatchParams = {
+      contract,
+      contractAddress,
+      bridgeContract,
+      publicDataProvider: poller,
+    };
+    const { contractState, ledger, batchHash } =
+      await ensurePendingBatch(ensureParams);
+    return await fn({
+      contractState,
+      ledger,
+      batchHash,
+      bridgeContract,
+      contract,
+      contractAddress,
+    });
+  }
+
   const walletSeed = getWalletSeedFromEnv();
   const logPath = path.resolve(
     currentDir,
@@ -187,23 +224,26 @@ async function withLedgerAndBridgeContract<T>(
 export async function runFinalizeBatch(
   cliConfig: CliConfig,
   opts: FinalizeBatchOptions,
-): Promise<void> {
+  executorContext?: ExecutorContext,
+): Promise<FinalizeBatchResult> {
   const { config, contractAddress } = cliConfig;
   const { batchPublicData, signatures, signerBitmap, finalizeTimestamp } = opts;
 
-  const walletSeed = getWalletSeedFromEnv();
-  const logPath = path.resolve(
-    currentDir,
-    '..',
-    'logs',
-    'bridge-cli',
-    `${new Date().toISOString()}.log`,
-  );
-  const logger = await createLogger(logPath);
-  api.setLogger(logger);
-
   let walletContext: api.WalletContext | null = null;
-  try {
+  let providers = executorContext?.providers;
+  let bridgeContract = executorContext?.bridgeContract;
+
+  if (!providers || !bridgeContract) {
+    const walletSeed = getWalletSeedFromEnv();
+    const logPath = path.resolve(
+      currentDir,
+      '..',
+      'logs',
+      'bridge-cli',
+      `${new Date().toISOString()}.log`,
+    );
+    const logger = await createLogger(logPath);
+    api.setLogger(logger);
     const isHex =
       /^[0-9a-fA-F]{64}$/.test(walletSeed) ||
       /^0x[0-9a-fA-F]+$/.test(walletSeed);
@@ -213,9 +253,11 @@ export async function runFinalizeBatch(
     } else {
       walletContext = await api.buildWalletAndWaitForFunds(config, walletSeed);
     }
-    const providers = await api.configureProviders(walletContext, config);
-    const bridgeContract = await api.joinContract(providers, contractAddress);
+    providers = await api.configureProviders(walletContext, config);
+    bridgeContract = await api.joinContract(providers, contractAddress);
+  }
 
+  try {
     const tx = await bridgeContract.callTx.finalizeBatch(
       batchPublicData,
       signatures,
@@ -224,19 +266,18 @@ export async function runFinalizeBatch(
     );
     const txHash = tx.public.txHash;
     const batchIndexStr = batchPublicData.batchIndex.toString();
-
-    if (opts.json) {
-      console.log(
-        JSON.stringify({
-          txHash,
-          batchIndex: batchIndexStr,
-          status: 'submitted',
-        }),
-      );
-    } else {
+    const result: FinalizeBatchResult = {
+      txHash,
+      batchIndex: batchIndexStr,
+      status: 'submitted',
+    };
+    if (!executorContext && opts.json) {
+      console.log(JSON.stringify(result));
+    } else if (!executorContext) {
       console.log('finalizeBatch txHash:', txHash);
       console.log('batch index:', batchIndexStr);
     }
+    return result;
   } finally {
     if (walletContext) {
       await api.closeWallet(walletContext);

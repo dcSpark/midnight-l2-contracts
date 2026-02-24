@@ -4,6 +4,7 @@ use crate::bridge::batch;
 use crate::cli::BatchArgs;
 use crate::commands::decode::load_bridge_ledger;
 use crate::commands::mock_batch::read_latest_mock_batch;
+use crate::executor_client;
 use crate::ts_cli;
 
 pub async fn run(args: BatchArgs) -> Result<()> {
@@ -31,12 +32,29 @@ pub async fn run(args: BatchArgs) -> Result<()> {
     let signer_bitmap = batch::default_signer_bitmap();
     let finalize_timestamp = 0u64;
     let batch_public_data_json = ts_cli::batch_public_data_to_json(&batch_public_data);
+
+    let signatures_json = if let Some(ref base) = args.bridge.executor_url {
+        executor_client::build_signatures(base, &batch_public_data_json, args.signature_max_nonce).await?
+    } else {
+        let env_args = ts_cli::TsCliEnvVars::from_bridge_call(&args.bridge);
+        ts_cli::build_signatures_json_from_batch(
+            &env_args,
+            &batch_public_data_json,
+            args.signature_max_nonce,
+        )?
+    };
+
+    if let Some(ref base) = args.bridge.executor_url {
+        return executor_client::finalize_batch(
+            base,
+            &batch_public_data_json,
+            &signatures_json,
+            signer_bitmap,
+            finalize_timestamp,
+        )
+        .await;
+    }
     let env_args = ts_cli::TsCliEnvVars::from_bridge_call(&args.bridge);
-    let signatures_json = ts_cli::build_signatures_json_from_batch(
-        &env_args,
-        &batch_public_data_json,
-        args.signature_max_nonce,
-    )?;
     ts_cli::run_finalize_batch(
         &env_args,
         &batch_public_data_json,

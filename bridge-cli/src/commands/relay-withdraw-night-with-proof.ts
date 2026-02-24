@@ -6,6 +6,7 @@ import { type CliConfig, getWalletSeedFromEnv } from '../cli-config.js';
 import { createLogger } from '../logger.js';
 import path from 'node:path';
 import { currentDir } from '../config.js';
+import type { ExecutorContext } from '../executor-context.js';
 
 export interface RelayWithdrawNightWithProofOptions {
   l2Sender: string; // hex 32 bytes (64 hex chars)
@@ -16,6 +17,14 @@ export interface RelayWithdrawNightWithProofOptions {
   indexBits: string; // JSON boolean[] (length 16), LSB-first
   siblings: string; // JSON string[] of hex32 (length 16)
   json?: boolean;
+}
+
+export interface RelayWithdrawNightWithProofResult {
+  txHash: string;
+  amount: string;
+  batchIndex: string;
+  nonce: string;
+  status: string;
 }
 
 function hexToBytes32(hex: string, label: string): Uint8Array {
@@ -60,7 +69,8 @@ function parseSiblings(json: string): Uint8Array[] {
 export async function runRelayWithdrawNightWithProof(
   cliConfig: CliConfig,
   opts: RelayWithdrawNightWithProofOptions,
-): Promise<void> {
+  executorContext?: ExecutorContext,
+): Promise<RelayWithdrawNightWithProofResult> {
   const { config, contractAddress } = cliConfig;
   const l2Sender = hexToBytes32(opts.l2Sender, '--l2-sender');
   const recipient = hexToBytes32(opts.recipient, '--recipient');
@@ -79,19 +89,21 @@ export async function runRelayWithdrawNightWithProof(
   const indexBits = parseIndexBits(opts.indexBits);
   const siblings = parseSiblings(opts.siblings);
 
-  const walletSeed = getWalletSeedFromEnv();
-  const logPath = path.resolve(
-    currentDir,
-    '..',
-    'logs',
-    'bridge-cli',
-    `${new Date().toISOString()}.log`,
-  );
-  const logger = await createLogger(logPath);
-  api.setLogger(logger);
-
   let walletContext: api.WalletContext | null = null;
-  try {
+  let providers = executorContext?.providers;
+  let bridgeContract = executorContext?.bridgeContract;
+
+  if (!providers || !bridgeContract) {
+    const walletSeed = getWalletSeedFromEnv();
+    const logPath = path.resolve(
+      currentDir,
+      '..',
+      'logs',
+      'bridge-cli',
+      `${new Date().toISOString()}.log`,
+    );
+    const logger = await createLogger(logPath);
+    api.setLogger(logger);
     const isHex =
       /^[0-9a-fA-F]{64}$/.test(walletSeed) ||
       /^0x[0-9a-fA-F]+$/.test(walletSeed);
@@ -100,9 +112,11 @@ export async function runRelayWithdrawNightWithProof(
     } else {
       walletContext = await api.buildWalletAndWaitForFunds(config, walletSeed);
     }
-    const providers = await api.configureProviders(walletContext, config);
-    const bridgeContract = await api.joinContract(providers, contractAddress);
+    providers = await api.configureProviders(walletContext, config);
+    bridgeContract = await api.joinContract(providers, contractAddress);
+  }
 
+  try {
     const tx = await bridgeContract.callTx.relayWithdrawNIGHTWithProof(
       l2Sender,
       recipient,
@@ -115,20 +129,19 @@ export async function runRelayWithdrawNightWithProof(
       },
     );
     const txHash = tx.public.txHash;
-
-    if (opts.json) {
-      console.log(
-        JSON.stringify({
-          txHash,
-          amount: amount.toString(),
-          batchIndex: batchIndex.toString(),
-          nonce: nonce.toString(),
-          status: 'submitted',
-        }),
-      );
-    } else {
+    const result: RelayWithdrawNightWithProofResult = {
+      txHash,
+      amount: amount.toString(),
+      batchIndex: batchIndex.toString(),
+      nonce: nonce.toString(),
+      status: 'submitted',
+    };
+    if (!executorContext && opts.json) {
+      console.log(JSON.stringify(result));
+    } else if (!executorContext) {
       console.log('relayWithdrawNIGHTWithProof txHash:', txHash);
     }
+    return result;
   } finally {
     if (walletContext) {
       await api.closeWallet(walletContext);

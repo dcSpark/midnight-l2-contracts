@@ -4,6 +4,7 @@ use crate::bridge::batch;
 use crate::cli::BatchArgs;
 use crate::commands::decode::load_bridge_ledger;
 use crate::commands::mock_batch::write_latest_mock_batch;
+use crate::executor_client;
 use crate::ts_cli;
 
 pub async fn run(args: BatchArgs) -> Result<()> {
@@ -24,6 +25,9 @@ pub async fn run(args: BatchArgs) -> Result<()> {
     write_latest_mock_batch(&batch_public_data)?;
     let batch_hash_str = hex::encode(batch_hash);
 
+    if let Some(ref base) = args.bridge.executor_url {
+        return executor_client::commit_batch(base, &parent_hash_str, &batch_hash_str).await;
+    }
     let env_args = ts_cli::TsCliEnvVars::from_bridge_call(&args.bridge);
     ts_cli::run_commit_batch(&env_args, &parent_hash_str, &batch_hash_str)
 }
