@@ -58,6 +58,7 @@ import {
   UnshieldedWallet,
   type UnshieldedKeystore,
 } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
+import { deriveDefaultVerifierSet } from './batch-helpers.js';
 import { mnemonicToSeed } from './test/utils/utils.js';
 
 let logger: Logger;
@@ -211,7 +212,7 @@ type BridgeConstructorArgs = [
 const toHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
 
 const createDefaultConstructorArgs = (ownerBytes: Uint8Array): BridgeConstructorArgs => {
-  const verifierSet = DEFAULT_VERIFIER_SECRET_KEYS.map((sk) => Bridge.pureCircuits.derivePk(sk));
+  const verifierSet = deriveDefaultVerifierSet();
   return [
     ownerBytes,
     DEFAULT_LAYER2_CHAIN_ID,
@@ -555,6 +556,9 @@ export const createWalletAndMidnightProvider = async (
   };
 };
 
+/** Default timeout for wallet sync (e.g. node unreachable). */
+const WALLET_SYNC_TIMEOUT_MS = 60_000;
+
 export const waitForSync = (wallet: WalletFacade) =>
   Rx.firstValueFrom(
     wallet.state().pipe(
@@ -563,8 +567,19 @@ export const waitForSync = (wallet: WalletFacade) =>
         logger.info(`Waiting for wallet sync. Synced: ${state.isSynced}`);
       }),
       Rx.filter((state) => state.isSynced),
+      Rx.timeout({ first: WALLET_SYNC_TIMEOUT_MS }),
     ),
-  );
+  ).catch((err: unknown) => {
+    const isTimeout =
+      (err && typeof err === 'object' && 'name' in err && (err as { name?: string }).name === 'TimeoutError') ||
+      (err instanceof Error && err.message.includes('Timeout'));
+    if (isTimeout) {
+      throw new Error(
+        `Wallet did not sync within ${WALLET_SYNC_TIMEOUT_MS / 1000}s. Is the Midnight node running? (MIDNIGHT_NODE_WS, default ws://127.0.0.1:9944)`,
+      );
+    }
+    throw err;
+  });
 
 export const waitForFunds = (wallet: WalletFacade) =>
   Rx.firstValueFrom(

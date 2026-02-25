@@ -6,9 +6,16 @@ import { type ContractState } from '@midnight-ntwrk/compact-runtime';
 import { createHash, randomBytes } from 'node:crypto';
 import { Bridge, type BridgePrivateState } from 'bridge-contract/browser';
 import type { DeployedBridgeContract } from './common-types.js';
+import {
+  signBytes32 as ledgerSignBytes32,
+  verifyBytes32 as ledgerVerifyBytes32,
+  derivePk as ledgerDerivePk,
+  hashBatchPublicDataV1FullLedger,
+  type Signature as LedgerSignature,
+} from './ledger-signer.js';
 
 export type L1_BatchPublicDataV1Full = Bridge.L1_BatchPublicDataV1Full;
-export type Signature = Bridge.Signature;
+export type Signature = LedgerSignature;
 export type BridgeLedger = ReturnType<typeof Bridge.ledger>;
 
 export const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n] as const;
@@ -225,15 +232,8 @@ function signWithNonceRetry(
   let lastError: unknown = null;
   for (let nonce = SIGNATURE_NONCE; nonce < limit; nonce += 1n) {
     try {
-      const signature = Bridge.pureCircuits.signBytes32(
-        digest,
-        secretKey,
-        nonce,
-      ) as Signature;
-      const valid = Bridge.pureCircuits.verifyBytes32(
-        digest,
-        signature,
-      ) as boolean;
+      const signature = ledgerSignBytes32(digest, secretKey, nonce);
+      const valid = ledgerVerifyBytes32(digest, signature);
       if (valid) {
         return signature;
       }
@@ -315,6 +315,7 @@ function sha256(data: Uint8Array): Uint8Array {
 
 const BATCH_DOMAIN = strictPadBytes32('mdn:bpd:v1full');
 
+/** Batch digest via ledger persistentHash (matches contract L1Rollup.hashBatchPublicDataV1Full). */
 export function hashBatchPublicDataV1Full(b: L1_BatchPublicDataV1Full): Uint8Array {
   const chunks = [
     BATCH_DOMAIN,
@@ -332,13 +333,11 @@ export function hashBatchPublicDataV1Full(b: L1_BatchPublicDataV1Full): Uint8Arr
     ensureBytes32Length(b.postStateRoot, 'postStateRoot'),
     ensureBytes32Length(b.withdrawRoot, 'withdrawRoot'),
   ];
-  return sha256(concatBytes32Chunks(chunks));
+  return hashBatchPublicDataV1FullLedger(chunks);
 }
 
-export function deriveDefaultVerifierSet(): ReturnType<typeof Bridge.pureCircuits.derivePk>[] {
-  return DEFAULT_VERIFIER_SECRET_KEYS.map((sk) =>
-    Bridge.pureCircuits.derivePk(sk),
-  );
+export function deriveDefaultVerifierSet(): Signature['pk'][] {
+  return DEFAULT_VERIFIER_SECRET_KEYS.map((sk) => ledgerDerivePk(sk));
 }
 
 /** Parse 64-char hex (optionally 0x-prefixed) to 32 bytes. */

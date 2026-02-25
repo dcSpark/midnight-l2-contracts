@@ -5,13 +5,15 @@ use crate::cli::BatchArgs;
 use crate::commands::decode::load_bridge_ledger;
 use crate::commands::mock_batch::read_latest_mock_batch;
 use crate::executor_client;
+use crate::signatures;
 use crate::ts_cli;
 
 pub async fn run(args: BatchArgs) -> Result<()> {
     ts_cli::validate_contract_address(&args.bridge.contract)?;
 
-    let ledger = load_bridge_ledger(&args.bridge).await?;
     let batch_public_data = read_latest_mock_batch()?;
+
+    let ledger = load_bridge_ledger(&args.bridge).await?;
     let expected_batch_index = ledger.rollup.misc_data.last_finalized_batch_index + 1;
     if batch_public_data.batch_index != expected_batch_index {
         return Err(anyhow!(
@@ -36,12 +38,7 @@ pub async fn run(args: BatchArgs) -> Result<()> {
     let signatures_json = if let Some(ref base) = args.bridge.executor_url {
         executor_client::build_signatures(base, &batch_public_data_json, args.signature_max_nonce).await?
     } else {
-        let env_args = ts_cli::TsCliEnvVars::from_bridge_call(&args.bridge);
-        ts_cli::build_signatures_json_from_batch(
-            &env_args,
-            &batch_public_data_json,
-            args.signature_max_nonce,
-        )?
+        signatures::build_signatures_json(&batch_public_data, args.signature_max_nonce)?
     };
 
     if let Some(ref base) = args.bridge.executor_url {

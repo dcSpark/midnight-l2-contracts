@@ -5,6 +5,7 @@ mod bridge;
 mod cli;
 mod commands;
 mod executor_client;
+mod signatures;
 mod ts_cli;
 
 pub use cli::{BatchArgs, BridgeCallArgs, DecodeArgs, DepositArgs};

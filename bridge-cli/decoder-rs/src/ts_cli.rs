@@ -73,6 +73,7 @@ fn run_bridge_cli_cmd(args: &[&str], env_args: &TsCliEnvVars) -> Result<std::pro
     Ok(status)
 }
 
+#[allow(dead_code)]
 fn run_bridge_cli_cmd_output(
     args: &[&str],
     env_args: &TsCliEnvVars,
@@ -278,50 +279,3 @@ pub fn run_claim_l1_withdrawal_unshielded(
     }
 }
 
-/// Build signatures JSON via TS batch-helpers to match contract/browser pure circuits exactly.
-pub fn build_signatures_json_from_batch(
-    env_args: &TsCliEnvVars,
-    batch_public_data_json: &str,
-    signature_max_nonce: u64,
-) -> Result<String> {
-    let ts_script = r#"
-import {
-  parseBatchPublicDataFromJson,
-  hashBatchPublicDataV1Full,
-  buildSignatureVector,
-  signaturesToJson,
-} from './src/batch-helpers.ts';
-
-const raw = process.env.BATCH_PUBLIC_DATA_JSON ?? '';
-if (!raw) {
-  throw new Error('missing batch public data json arg');
-}
-const bpd = parseBatchPublicDataFromJson(raw);
-const digest = hashBatchPublicDataV1Full(bpd);
-const sigs = buildSignatureVector(digest);
-process.stdout.write(signaturesToJson(sigs));
-"#;
-    let args = ["-e", ts_script];
-    let output = run_bridge_cli_cmd_output(
-        &args,
-        env_args,
-        &[
-            ("SIGNATURE_MAX_NONCE", signature_max_nonce.to_string()),
-            (
-                "BATCH_PUBLIC_DATA_JSON",
-                batch_public_data_json.to_string(),
-            ),
-        ],
-    )?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!(
-            "bridge-cli TS signature helper exited with {}: {}",
-            output.status,
-            stderr.trim()
-        );
-    }
-    let stdout = String::from_utf8(output.stdout)
-        .context("bridge-cli TS signature helper output was not valid UTF-8")?;
-    Ok(stdout.trim().to_string())
-}
