@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "layer2ChainId": 0,
+  "rollupId": "0000000000000000000000000000000000000000000000000000000000000000",
+  "batchIndex": 2,
+  "daStartHeight": 0,
+  "daEndHeight": 0,
+  "daCommitment": "0000000000000000000000000000000000000000000000000000000000000000",
+  "lastProcessedQueueIndex": 1,
+  "messageQueueHash": "21070a78ff6f0d57a9d7d54fb76621fd6dcbe182a96a4ea92f720b7d96f5d5d0",
+  "prevStateRoot": "4e305a9a71006e2ca2b60167a9d30e7a217f67938699cd6fc3e194c62405617c",
+  "prevBatchHash": "a801ce756e3c669b7c80e2890ae6b943b52a9be19bfe198116320aae3a2b6c55",
+  "postStateRoot": "a870eaed70fa1b01acd893cafd4139ce90e19586cadfcf8d9b310ac5e1e47646",
+  "batchHash": "76b34f5df8991de25958936bcca7d64a95e852d8832300314c62b73bf6a801c8",
+  "withdrawRoot": "b7578ce21ac2b7b4308025b737539dd87663ff64eec8020324e1f2c4551d22ac"
+}

@@ -7,6 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Bridge, type BridgePrivateState } from 'bridge-contract/browser';
 import type { DeployedBridgeContract } from './common-types.js';
 import {
+  computeChallenge as ledgerComputeChallenge,
   signBytes32 as ledgerSignBytes32,
   verifyBytes32 as ledgerVerifyBytes32,
   derivePk as ledgerDerivePk,
@@ -21,8 +22,13 @@ export type BridgeLedger = ReturnType<typeof Bridge.ledger>;
 export const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n] as const;
 export const DEFAULT_SIGNER_BITMAP =
   (1n << BigInt(DEFAULT_VERIFIER_SECRET_KEYS.length)) - 1n;
-const SIGNATURE_NONCE = 0n;
+/** Start at 1 so r = G*nonce is never the identity point (contract may reject identity r). Must match decoder-rs. */
+const SIGNATURE_NONCE = 1n;
 const DEFAULT_SIGNATURE_MAX_NONCE = 256n;
+
+/** Scalar field order of the embedded curve (Jubjub). Contract expects s < this; skip nonces that yield s >= order. */
+const JUBJUB_SCALAR_FIELD =
+  6554484396890773809930967563523245729705921265872317281365359162392183254199n;
 
 export type PublicDataProvider = {
   queryContractState: (address: string) => Promise<ContractState | null>;
@@ -233,12 +239,34 @@ function signWithNonceRetry(
   for (let nonce = SIGNATURE_NONCE; nonce < limit; nonce += 1n) {
     try {
       const signature = ledgerSignBytes32(digest, secretKey, nonce);
+      if (signature.s >= JUBJUB_SCALAR_FIELD) {
+        continue;
+      }
       const valid = ledgerVerifyBytes32(digest, signature);
       if (valid) {
+        const c = ledgerComputeChallenge(signature.r, signature.pk, digest);
+        console.error(
+          `[signing] TS challenge c (accepted sig): ${c}`,
+        );
+        const r = signature.r as { x: bigint; y: bigint };
+        console.error(
+          `[signing] TS signer ${signerIndex}: nonce ${nonce} sk=${secretKey} r.x=${r.x} r.y=${r.y} s=${signature.s}`,
+        );
         return signature;
+      }
+      if (nonce === 1n) {
+        console.error(
+          `[signing] TS signer ${signerIndex} nonce 1: sign succeeded but verify returned false`,
+        );
       }
     } catch (error) {
       lastError = error;
+      if (nonce === 1n) {
+        console.error(
+          `[signing] TS signer ${signerIndex} nonce 1: sign threw`,
+          error,
+        );
+      }
     }
   }
   if (lastError) {

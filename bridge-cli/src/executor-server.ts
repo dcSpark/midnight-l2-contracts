@@ -324,6 +324,8 @@ export async function createExecutorServer(ctx: {
               : JSON.stringify(batchPublicDataRaw);
           const bpd = parseBatchPublicDataFromJson(jsonStr);
           const digest = hashBatchPublicDataV1Full(bpd);
+          const digestHex = Buffer.from(digest).toString('hex');
+          logger.info({ digestHex, pathname: '/build-signatures' }, 'TS digest');
           const maxNonce =
             signatureMaxNonce !== undefined && signatureMaxNonce > 0
               ? BigInt(signatureMaxNonce)

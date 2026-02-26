@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 use crate::bridge::batch;
 use crate::cli::BatchArgs;
@@ -35,10 +35,19 @@ pub async fn run(args: BatchArgs) -> Result<()> {
     let finalize_timestamp = 0u64;
     let batch_public_data_json = ts_cli::batch_public_data_to_json(&batch_public_data);
 
+    let rust_signatures_json =
+        signatures::build_signatures_json(&batch_public_data, args.signature_max_nonce)?;
+
     let signatures_json = if let Some(ref base) = args.bridge.executor_url {
-        executor_client::build_signatures(base, &batch_public_data_json, args.signature_max_nonce).await?
+        let ts_signatures_json =
+            executor_client::build_signatures(base, &batch_public_data_json, args.signature_max_nonce).await?;
+        if let Err(e) = compare_signatures_json(&rust_signatures_json, &ts_signatures_json) {
+            log_signature_diff(&rust_signatures_json, &ts_signatures_json);
+            return Err(e);
+        }
+        ts_signatures_json
     } else {
-        signatures::build_signatures_json(&batch_public_data, args.signature_max_nonce)?
+        rust_signatures_json
     };
 
     if let Some(ref base) = args.bridge.executor_url {
@@ -59,4 +68,84 @@ pub async fn run(args: BatchArgs) -> Result<()> {
         signer_bitmap,
         finalize_timestamp,
     )
+}
+
+/// Log full side-by-side diff of Rust vs TS signatures to stderr for debugging.
+fn log_signature_diff(rust_json: &str, ts_json: &str) {
+    let rust_sigs: Vec<serde_json::Value> = match serde_json::from_str(rust_json) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let ts_sigs: Vec<serde_json::Value> = match serde_json::from_str(ts_json) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let canonical = |v: Option<&serde_json::Value>| -> String {
+        match v {
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => "missing".to_string(),
+        }
+    };
+    eprintln!("[signing] --- Rust vs TS signature diff ---");
+    for (i, (r, t)) in rust_sigs.iter().zip(ts_sigs.iter()).enumerate() {
+        for (name, rv, tv) in [
+            ("pk.x", r.get("pk").and_then(|p| p.get("x")), t.get("pk").and_then(|p| p.get("x"))),
+            ("pk.y", r.get("pk").and_then(|p| p.get("y")), t.get("pk").and_then(|p| p.get("y"))),
+            ("r.x", r.get("r").and_then(|p| p.get("x")), t.get("r").and_then(|p| p.get("x"))),
+            ("r.y", r.get("r").and_then(|p| p.get("y")), t.get("r").and_then(|p| p.get("y"))),
+            ("s", r.get("s"), t.get("s")),
+        ] {
+            let rs = canonical(rv);
+            let ts = canonical(tv);
+            let eq = if rs == ts { "ok" } else { "DIFF" };
+            eprintln!("[signing]   signer {} {}: {} Rust={} TS={}", i, name, eq, rs, ts);
+        }
+    }
+    eprintln!("[signing] --- end diff ---");
+}
+
+/// Compare Rust-built and TS-built signatures JSON; return Err with details on first difference.
+fn compare_signatures_json(rust_json: &str, ts_json: &str) -> Result<()> {
+    let rust_sigs: Vec<serde_json::Value> =
+        serde_json::from_str(rust_json).map_err(|e| anyhow!("Rust signatures JSON: {}", e))?;
+    let ts_sigs: Vec<serde_json::Value> =
+        serde_json::from_str(ts_json).map_err(|e| anyhow!("TS signatures JSON: {}", e))?;
+    if rust_sigs.len() != ts_sigs.len() {
+        return Err(anyhow!(
+            "Rust vs TS signatures: length {} vs {}",
+            rust_sigs.len(),
+            ts_sigs.len()
+        ));
+    }
+    for (i, (r, t)) in rust_sigs.iter().zip(ts_sigs.iter()).enumerate() {
+        let fields = [
+            ("pk.x", r.get("pk").and_then(|p| p.get("x")), t.get("pk").and_then(|p| p.get("x"))),
+            ("pk.y", r.get("pk").and_then(|p| p.get("y")), t.get("pk").and_then(|p| p.get("y"))),
+            ("r.x", r.get("r").and_then(|p| p.get("x")), t.get("r").and_then(|p| p.get("x"))),
+            ("r.y", r.get("r").and_then(|p| p.get("y")), t.get("r").and_then(|p| p.get("y"))),
+            ("s", r.get("s"), t.get("s")),
+        ];
+        for (name, rv, tv) in fields {
+            let canonical = |v: Option<&serde_json::Value>| -> String {
+                match v {
+                    Some(serde_json::Value::Number(n)) => n.to_string(),
+                    Some(serde_json::Value::String(s)) => s.clone(),
+                    _ => "missing".to_string(),
+                }
+            };
+            let rs = canonical(rv);
+            let ts = canonical(tv);
+            if rs != ts {
+                return Err(anyhow!(
+                    "Rust vs TS signatures differ at signer {} field {}: Rust {} vs TS {}",
+                    i,
+                    name,
+                    rs,
+                    ts
+                ));
+            }
+        }
+    }
+    Ok(())
 }
