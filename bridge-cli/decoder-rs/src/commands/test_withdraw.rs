@@ -355,11 +355,9 @@ pub async fn run(args: TestWithdrawArgs) -> Result<()> {
     batch_public_data.withdraw_root = withdraw_root;
     write_latest_mock_batch(&batch_public_data)?;
     let batch_public_data_json = ts_cli::batch_public_data_to_json(&batch_public_data);
-    let signatures_json = if let Some(base) = executor_base {
-        executor_client::build_signatures(base, &batch_public_data_json, args.signature_max_nonce).await?
-    } else {
-        signatures::build_signatures_json(&batch_public_data, args.signature_max_nonce)?
-    };
+    let verifier_keys = signatures::verifier_secret_keys_from_env()?;
+    let (signatures_json, _) =
+        signatures::build_signatures_json(&batch_public_data, &args.signature_nonce, &verifier_keys)?;
 
     log_progress("sending finalizeBatch...");
     if let Some(base) = executor_base {

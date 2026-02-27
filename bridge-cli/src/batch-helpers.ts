@@ -7,9 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Bridge, type BridgePrivateState } from 'bridge-contract/browser';
 import type { DeployedBridgeContract } from './common-types.js';
 import {
-  computeChallenge as ledgerComputeChallenge,
   signBytes32 as ledgerSignBytes32,
-  verifyBytes32 as ledgerVerifyBytes32,
   derivePk as ledgerDerivePk,
   hashBatchPublicDataV1FullLedger,
   type Signature as LedgerSignature,
@@ -22,13 +20,22 @@ export type BridgeLedger = ReturnType<typeof Bridge.ledger>;
 export const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n] as const;
 export const DEFAULT_SIGNER_BITMAP =
   (1n << BigInt(DEFAULT_VERIFIER_SECRET_KEYS.length)) - 1n;
-/** Start at 1 so r = G*nonce is never the identity point (contract may reject identity r). Must match decoder-rs. */
-const SIGNATURE_NONCE = 1n;
-const DEFAULT_SIGNATURE_MAX_NONCE = 256n;
-
-/** Scalar field order of the embedded curve (Jubjub). Contract expects s < this; skip nonces that yield s >= order. */
-const JUBJUB_SCALAR_FIELD =
-  6554484396890773809930967563523245729705921265872317281365359162392183254199n;
+/** Base nonce for signing; 0 is treated as 1 so r is never identity. Matches decoder-rs SIGNATURE_NONCE. */
+function getSignatureNonce(): bigint {
+  const raw = (
+    process.env.TEST_DECODE_SIGNATURE_NONCE ??
+    process.env.SIGNATURE_NONCE ??
+    ''
+  ).trim();
+  if (raw.length === 0) {
+    return 1n;
+  }
+  const parsed = BigInt(raw);
+  if (parsed < 0n) {
+    throw new Error('SIGNATURE_NONCE must be non-negative if provided');
+  }
+  return parsed;
+}
 
 export type PublicDataProvider = {
   queryContractState: (address: string) => Promise<ContractState | null>;
@@ -213,79 +220,17 @@ export async function buildBatchPublicData(
   } satisfies L1_BatchPublicDataV1Full;
 }
 
-function getSignatureNonceSearchLimit(): bigint {
-  const raw = (
-    process.env.TEST_DECODE_SIGNATURE_MAX_NONCE ??
-    process.env.SIGNATURE_MAX_NONCE ??
-    ''
-  ).trim();
-  if (raw.length === 0) {
-    return DEFAULT_SIGNATURE_MAX_NONCE;
-  }
-  const parsed = BigInt(raw);
-  if (parsed <= 0n) {
-    throw new Error('SIGNATURE_MAX_NONCE must be positive if provided');
-  }
-  return parsed;
-}
-
-function signWithNonceRetry(
-  digest: Uint8Array,
-  secretKey: bigint,
-  signerIndex: number,
-  limit: bigint,
-): Signature {
-  let lastError: unknown = null;
-  for (let nonce = SIGNATURE_NONCE; nonce < limit; nonce += 1n) {
-    try {
-      const signature = ledgerSignBytes32(digest, secretKey, nonce);
-      if (signature.s >= JUBJUB_SCALAR_FIELD) {
-        continue;
-      }
-      const valid = ledgerVerifyBytes32(digest, signature);
-      if (valid) {
-        const c = ledgerComputeChallenge(signature.r, signature.pk, digest);
-        console.error(
-          `[signing] TS challenge c (accepted sig): ${c}`,
-        );
-        const r = signature.r as { x: bigint; y: bigint };
-        console.error(
-          `[signing] TS signer ${signerIndex}: nonce ${nonce} sk=${secretKey} r.x=${r.x} r.y=${r.y} s=${signature.s}`,
-        );
-        return signature;
-      }
-      if (nonce === 1n) {
-        console.error(
-          `[signing] TS signer ${signerIndex} nonce 1: sign succeeded but verify returned false`,
-        );
-      }
-    } catch (error) {
-      lastError = error;
-      if (nonce === 1n) {
-        console.error(
-          `[signing] TS signer ${signerIndex} nonce 1: sign threw`,
-          error,
-        );
-      }
-    }
-  }
-  if (lastError) {
-    throw new Error(
-      `Unable to produce a valid signature for signer ${signerIndex} after scanning ${limit.toString()} nonces. Last error: ${lastError}`,
-    );
-  }
-  throw new Error(
-    `Unable to produce a valid signature for signer ${signerIndex} after scanning ${limit.toString()} nonces.`,
-  );
-}
-
 export function buildSignatureVector(
   digest: Uint8Array,
-  maxNonce?: bigint,
+  signatureNonce?: bigint,
 ): Signature[] {
-  const limit = maxNonce ?? getSignatureNonceSearchLimit();
-  return DEFAULT_VERIFIER_SECRET_KEYS.map((sk, index) =>
-    signWithNonceRetry(digest, sk, index, limit),
+  const keys = getVerifierSecretKeysFromEnvOrDefault();
+  const base =
+    (signatureNonce ?? getSignatureNonce()) === 0n
+      ? 1n
+      : signatureNonce ?? getSignatureNonce();
+  return keys.map((sk, index) =>
+    ledgerSignBytes32(digest, sk, base + BigInt(index)),
   );
 }
 
@@ -366,6 +311,43 @@ export function hashBatchPublicDataV1Full(b: L1_BatchPublicDataV1Full): Uint8Arr
 
 export function deriveDefaultVerifierSet(): Signature['pk'][] {
   return DEFAULT_VERIFIER_SECRET_KEYS.map((sk) => ledgerDerivePk(sk));
+}
+
+const VERIFIER_SECRET_KEYS_ENV = 'VERIFIER_SECRET_KEYS';
+
+/**
+ * Verifier secret keys from env VERIFIER_SECRET_KEYS when set (comma-separated decimals, exactly 3),
+ * otherwise the default keys. Matches decoder-rs verifier_secret_keys_from_env behavior.
+ * Use this for signing so signatures match the verifier set set via setVerifierSet.
+ */
+export function getVerifierSecretKeysFromEnvOrDefault(): bigint[] {
+  const raw = process.env[VERIFIER_SECRET_KEYS_ENV];
+  if (raw == null || raw === '') {
+    return [...DEFAULT_VERIFIER_SECRET_KEYS];
+  }
+  const parts = raw.split(',').map((p) => p.trim()).filter((p) => p !== '');
+  if (parts.length !== 3) {
+    throw new Error(
+      `${VERIFIER_SECRET_KEYS_ENV} must have exactly 3 comma-separated values, got ${parts.length}`,
+    );
+  }
+  const keys: bigint[] = [];
+  for (const p of parts) {
+    const n = BigInt(p);
+    if (n < 0n) {
+      throw new Error(`Invalid verifier key: ${p}`);
+    }
+    keys.push(n);
+  }
+  return keys;
+}
+
+/**
+ * Verifier set from env VERIFIER_SECRET_KEYS when set (comma-separated decimals, exactly 3),
+ * otherwise the default keys. Matches decoder-rs verifier_secret_keys_from_env behavior.
+ */
+export function getVerifierSetFromEnvOrDefault(): Signature['pk'][] {
+  return getVerifierSecretKeysFromEnvOrDefault().map((sk) => ledgerDerivePk(sk));
 }
 
 /** Parse 64-char hex (optionally 0x-prefixed) to 32 bytes. */

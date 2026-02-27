@@ -12,10 +12,20 @@ import {
   ecMulGenerator,
   ecMul,
   ecAdd,
-  addField,
-  mulField,
+  MAX_FIELD,
   type NativePoint,
 } from '@midnight-ntwrk/compact-runtime';
+
+const MODULUS = MAX_FIELD + 1n;
+
+/** Jubjub scalar field order; contract expects s < this. */
+const JUBJUB_SCALAR_FIELD =
+  6554484396890773809930967563523245729705921265872317281365359162392183254199n;
+
+function canonField(x: bigint): bigint {
+  const r = x % MODULUS;
+  return r >= 0n ? r : r + MODULUS;
+}
 
 const Bytes32 = new CompactTypeBytes(32);
 
@@ -53,7 +63,7 @@ export function computeChallenge(
 
 /**
  * Sign a 32-byte message with the given secret key and nonce.
- * Returns a signature that verifies on the Bridge contract.
+ * Computes s in the Jubjub scalar field (mod q) so any nonce works; no grinding.
  */
 export function signBytes32(
   msg: Uint8Array,
@@ -63,10 +73,14 @@ export function signBytes32(
   if (msg.length !== 32) {
     throw new Error('signBytes32: msg must be 32 bytes');
   }
-  const pk = ecMulGenerator(sk);
-  const r = ecMulGenerator(nonce);
+  const skQ = sk % JUBJUB_SCALAR_FIELD;
+  const nonceQ = nonce === 0n ? 1n : nonce % JUBJUB_SCALAR_FIELD;
+
+  const pk = ecMulGenerator(skQ);
+  const r = ecMulGenerator(nonceQ);
   const c = computeChallenge(r, pk, msg);
-  const s = addField(nonce, mulField(c, sk));
+  const cQ = c % JUBJUB_SCALAR_FIELD;
+  const s = (nonceQ + cQ * skQ) % JUBJUB_SCALAR_FIELD;
   return { pk, r, s };
 }
 
@@ -78,7 +92,8 @@ export function verifyBytes32(msg: Uint8Array, sig: Signature): boolean {
     return false;
   }
   const c = computeChallenge(sig.r, sig.pk, msg);
-  const lhs = ecMulGenerator(sig.s);
+  const sF = canonField(sig.s);
+  const lhs = ecMulGenerator(sF);
   const rhs = ecAdd(sig.r, ecMul(sig.pk, c));
   return lhs.x === rhs.x && lhs.y === rhs.y;
 }

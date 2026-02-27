@@ -1011,6 +1011,7 @@ dependencies = [
  "midnight-storage 1.1.1",
  "midnight-transient-crypto 2.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-7.0.1)",
  "num-bigint",
+ "num-traits",
  "rand 0.8.5",
  "reqwest",
  "serde",

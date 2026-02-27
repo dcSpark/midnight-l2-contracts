@@ -195,7 +195,7 @@ When the **bridge-cli executor service** is running, you can point decoder-rs at
 - `EXECUTOR_URL`: optional; base URL of the bridge-cli executor service (e.g. `http://127.0.0.1:3000`). When set, bridge actions use HTTP instead of the TS subprocess.
 - `BRIDGE_CLI_DIR`: optional; directory containing the bridge-cli package (default: parent of decoder-rs). Only used when **not** using the executor.
 - `BRIDGE_ARTIFACTS`: path containing Bridge `keys/` and `zkir/`
-- `SIGNATURE_MAX_NONCE`: max nonce scan depth for signature generation (passed to TS or executor)
+- `SIGNATURE_NONCE`: base nonce for signature generation (passed to TS or executor; signers use base, base+1, base+2)
 
 You can also pass these as CLI flags (`--contract`, `--indexer`, `--node-ws`, `--executor-url`, and so on).
 

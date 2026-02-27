@@ -2,7 +2,7 @@
  * set-verifier-set command: set the Bridge verifier set (admin). Requires wallet.
  */
 import * as api from '../api.js';
-import { deriveDefaultVerifierSet } from '../batch-helpers.js';
+import { getVerifierSetFromEnvOrDefault } from '../batch-helpers.js';
 import { type CliConfig, getWalletSeedFromEnv } from '../cli-config.js';
 import { createLogger } from '../logger.js';
 import path from 'node:path';
@@ -54,7 +54,7 @@ export async function runSetVerifierSet(
   }
 
   try {
-    const verifierSet = deriveDefaultVerifierSet();
+    const verifierSet = getVerifierSetFromEnvOrDefault();
     const tx = await bridgeContract.callTx.setVerifierSet(verifierSet);
     const txHash = tx.public.txHash;
     const result: SetVerifierSetResult = { txHash, status: 'submitted' };

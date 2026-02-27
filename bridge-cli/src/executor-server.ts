@@ -313,7 +313,7 @@ export async function createExecutorServer(ctx: {
         // POST /build-signatures
         if (pathname === '/build-signatures') {
           const batchPublicDataRaw = body.batchPublicData;
-          const signatureMaxNonce = body.signatureMaxNonce as number | undefined;
+          const signatureNonceRaw = body.signatureNonce as number | string | undefined;
           if (batchPublicDataRaw === undefined) {
             sendError(res, 400, 'batchPublicData required');
             return;
@@ -326,11 +326,13 @@ export async function createExecutorServer(ctx: {
           const digest = hashBatchPublicDataV1Full(bpd);
           const digestHex = Buffer.from(digest).toString('hex');
           logger.info({ digestHex, pathname: '/build-signatures' }, 'TS digest');
-          const maxNonce =
-            signatureMaxNonce !== undefined && signatureMaxNonce > 0
-              ? BigInt(signatureMaxNonce)
+          const signatureNonce =
+            signatureNonceRaw !== undefined && signatureNonceRaw !== ''
+              ? (typeof signatureNonceRaw === 'string'
+                  ? BigInt(signatureNonceRaw)
+                  : BigInt(signatureNonceRaw))
               : undefined;
-          const sigs = buildSignatureVector(digest, maxNonce);
+          const sigs = buildSignatureVector(digest, signatureNonce);
           const signatures = signaturesToJson(sigs);
           sendJson(res, 200, { signatures });
           return;

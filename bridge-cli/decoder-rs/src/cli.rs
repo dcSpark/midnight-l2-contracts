@@ -82,9 +82,9 @@ pub struct BatchArgs {
     #[command(flatten)]
     pub bridge: BridgeCallArgs,
 
-    /// Max nonce for signature scanning.
-    #[arg(long, env = "SIGNATURE_MAX_NONCE", default_value = "256")]
-    pub signature_max_nonce: u64,
+    /// Nonce used for signing (base; signers get nonce, nonce+1, nonce+2). Decimal string, can be up to ~255 bits.
+    #[arg(long, env = "SIGNATURE_NONCE", default_value = "1")]
+    pub signature_nonce: String,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -206,9 +206,9 @@ pub struct TestWithdrawArgs {
     #[arg(long, action = ArgAction::SetTrue)]
     pub skip_set_verifier_set: bool,
 
-    /// Max nonce for signature scanning.
-    #[arg(long, env = "SIGNATURE_MAX_NONCE", default_value = "256")]
-    pub signature_max_nonce: u64,
+    /// Nonce used for signing (base; signers get nonce, nonce+1, nonce+2). Decimal string, up to ~255 bits.
+    #[arg(long, env = "SIGNATURE_NONCE", default_value = "1")]
+    pub signature_nonce: String,
 
     /// Poll attempts for async checks.
     #[arg(long, default_value = "20")]
@@ -218,3 +218,4 @@ pub struct TestWithdrawArgs {
     #[arg(long, default_value = "3000")]
     pub wait_delay_ms: u64,
 }
+
