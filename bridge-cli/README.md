@@ -90,7 +90,7 @@ Run with `npm run cli -- <command>` or `npx tsx src/cli.ts <command>`:
 - `PROOF_SERVER` – Proof server URL.
 - `MIDNIGHT_NETWORK` – `preview` or `undeployed` (default: preview).
 - `FUNDING_SEED` or `MY_PREVIEW_MNEMONIC` – Wallet seed (hex) or mnemonic for signing commands.
-- `SIGNATURE_MAX_NONCE` – Max nonce for finalize-batch signature generation (optional).
+- `SIGNATURE_NONCE` – Base nonce for finalize-batch signature generation (optional; default 1).
 - `MY_UNDEPLOYED_UNSHIELDED_ADDRESS` – Optional. Bech32m unshielded address for standalone setup (`npm run setup-standalone`). If set, the script sends a test transfer to that address; if unset, the transfer is skipped.
 
 Add `--json` for machine-readable output (e.g. `{ "txHash": "...", "status": "submitted" }`).
@@ -140,7 +140,7 @@ The CLI can run as a **long-lived executor service** that builds and syncs the w
 Use the same environment variables as the one-shot CLI. The service resolves config at startup and keeps one wallet + contract join for the process lifetime.
 
 - **Required**: `BRIDGE_CONTRACT_ADDRESS`, `INDEXER_HTTP`, `MIDNIGHT_NODE_WS` (or `NODE_WS`), `PROOF_SERVER`, `FUNDING_SEED` (or `MY_PREVIEW_MNEMONIC`).
-- **Optional**: `INDEXER_WS`, `MIDNIGHT_NETWORK` (`preview` / `undeployed`), `BRIDGE_ARTIFACTS`, `SIGNATURE_MAX_NONCE`.
+- **Optional**: `INDEXER_WS`, `MIDNIGHT_NETWORK` (`preview` / `undeployed`), `BRIDGE_ARTIFACTS`, `SIGNATURE_NONCE`.
 
 Server binding:
 
@@ -194,7 +194,7 @@ All request/response bodies are JSON. On error the response has status 4xx/5xx a
 | POST | `/relay-withdraw-night-with-proof` | Body: `l2Sender`, `recipient`, `amount`, `batchIndex`, `nonce`, `indexBits`, `siblings`. |
 | POST | `/test-withdraw` | Body: optional same options as CLI (e.g. `depositAmount`, `skipSetVerifierSet`, `waitAttempts`, `waitDelayMs`). |
 | POST | `/deploy` | Body: optional `{ "deployerSeed" }`. Deploys a new contract; service stays joined to the address it was started with. |
-| POST | `/build-signatures` | Body: `{ "batchPublicData" }` (object or JSON string), optional `signatureMaxNonce`. Returns `{ "signatures": "<JSON string>" }` for use in finalize-batch. |
+| POST | `/build-signatures` | Body: `{ "batchPublicData" }` (object or JSON string), optional `signatureNonce` (base nonce, number or string). Returns `{ "signatures": "<JSON string>" }` for use in finalize-batch. |
 
 Success responses return the same shape as the CLI JSON output (e.g. `{ "txHash", "status" }`).
 

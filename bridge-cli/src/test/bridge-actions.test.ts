@@ -525,10 +525,10 @@ type EnsureBatchResult = {
   batchHash: Uint8Array;
 };
 
-const deriveDefaultVerifierSet = () => DEFAULT_VERIFIER_SECRET_KEYS.map((sk) => Bridge.pureCircuits.derivePk(sk));
+const getDefaultVerifierSet = () => require('../batch-helpers.js').deriveDefaultVerifierSet();
 
 const ensureDefaultVerifierSet = async (bridgeContract: DeployedBridgeContract): Promise<void> => {
-  await bridgeContract.callTx.setVerifierSet(deriveDefaultVerifierSet());
+  await bridgeContract.callTx.setVerifierSet(getDefaultVerifierSet());
 };
 
 const getContractStateAndLedger = async (

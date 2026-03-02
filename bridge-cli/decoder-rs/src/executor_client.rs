@@ -83,12 +83,12 @@ pub async fn finalize_batch(
     Ok(())
 }
 
-pub async fn build_signatures(base_url: &str, batch_public_data_json: &str, signature_max_nonce: u64) -> Result<String> {
+pub async fn build_signatures(base_url: &str, batch_public_data_json: &str, signature_nonce: &str) -> Result<String> {
     let batch_public_data: serde_json::Value =
         serde_json::from_str(batch_public_data_json).context("batch_public_data JSON")?;
     let body = json!({
         "batchPublicData": batch_public_data,
-        "signatureMaxNonce": signature_max_nonce,
+        "signatureNonce": signature_nonce,
     });
     #[derive(serde::Deserialize)]
     struct Out {

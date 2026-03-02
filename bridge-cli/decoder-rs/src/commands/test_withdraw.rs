@@ -7,7 +7,9 @@ use crate::bridge::batch;
 use crate::bridge::ledger::BridgeLedger;
 use crate::cli::TestWithdrawArgs;
 use crate::commands::decode::load_bridge_ledger;
+use crate::commands::mock_batch::write_latest_mock_batch;
 use crate::executor_client;
+use crate::signatures;
 use crate::ts_cli;
 
 const WITHDRAW_TREE_DEPTH: usize = 16;
@@ -351,16 +353,11 @@ pub async fn run(args: TestWithdrawArgs) -> Result<()> {
     let mut batch_public_data: BatchPublicDataV1Full =
         batch::build_batch_public_data(&ledger_for_batch, batch_hash)?;
     batch_public_data.withdraw_root = withdraw_root;
+    write_latest_mock_batch(&batch_public_data)?;
     let batch_public_data_json = ts_cli::batch_public_data_to_json(&batch_public_data);
-    let signatures_json = if let Some(base) = executor_base {
-        executor_client::build_signatures(base, &batch_public_data_json, args.signature_max_nonce).await?
-    } else {
-        ts_cli::build_signatures_json_from_batch(
-            &env_args,
-            &batch_public_data_json,
-            args.signature_max_nonce,
-        )?
-    };
+    let verifier_keys = signatures::verifier_secret_keys_from_env()?;
+    let (signatures_json, _) =
+        signatures::build_signatures_json(&batch_public_data, &args.signature_nonce, &verifier_keys)?;
 
     log_progress("sending finalizeBatch...");
     if let Some(base) = executor_base {
