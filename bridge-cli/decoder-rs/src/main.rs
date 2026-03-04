@@ -21,5 +21,6 @@ async fn main() -> Result<()> {
         }
         CommandKind::ClaimL1Withdrawal(args) => commands::claim_l1_withdrawal::run(args).await,
         CommandKind::TestWithdraw(args) => commands::test_withdraw::run(args).await,
+        CommandKind::TestCost(args) => commands::test_cost::run(args).await,
     }
 }

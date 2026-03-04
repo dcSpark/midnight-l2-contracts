@@ -21,6 +21,8 @@ pub enum CommandKind {
     RelayWithdrawNightWithProof(RelayWithdrawArgs),
     ClaimL1Withdrawal(ClaimL1WithdrawalArgs),
     TestWithdraw(TestWithdrawArgs),
+    /// Set verifier set, then run repeated commit-batch + finalize-batch until error or max attempts.
+    TestCost(TestCostArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -217,5 +219,19 @@ pub struct TestWithdrawArgs {
     /// Poll delay in milliseconds.
     #[arg(long, default_value = "3000")]
     pub wait_delay_ms: u64,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct TestCostArgs {
+    #[command(flatten)]
+    pub bridge: BridgeCallArgs,
+
+    /// Maximum number of commit+finalize cycles to run before stopping successfully.
+    #[arg(long, default_value = "30")]
+    pub max_attempts: u32,
+
+    /// Nonce used for finalize-batch signing (base; signers get nonce, nonce+1, nonce+2). Decimal string.
+    #[arg(long, env = "SIGNATURE_NONCE", default_value = "1")]
+    pub signature_nonce: String,
 }
 

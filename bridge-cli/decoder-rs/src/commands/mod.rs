@@ -5,5 +5,6 @@ pub mod deposit;
 pub mod finalize_batch;
 pub mod relay_withdraw_night_with_proof;
 pub mod set_verifier_set;
+pub mod test_cost;
 pub mod test_withdraw;
 mod mock_batch;
