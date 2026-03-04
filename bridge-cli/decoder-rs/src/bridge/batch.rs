@@ -24,9 +24,8 @@ pub fn compute_last_processed_queue_index(ledger: &BridgeLedger) -> u64 {
 pub fn build_batch_public_data(ledger: &BridgeLedger, batch_hash: [u8; 32]) -> Result<BatchPublicDataV1Full> {
     let last_finalized_batch_index = ledger.rollup.misc_data.last_finalized_batch_index;
     let batch_index = last_finalized_batch_index + 1;
-    let prev_batch_index = last_finalized_batch_index;
-    let prev_batch_hash = lookup_or_zero(&ledger.rollup.committed_batches, prev_batch_index);
-    let prev_state_root = lookup_or_zero(&ledger.rollup.finalized_state_roots, prev_batch_index);
+    let prev_batch_hash = ledger.rollup.last_finalized_batch_hash;
+    let prev_state_root = ledger.rollup.last_finalized_state_root;
     let last_processed_queue_index = compute_last_processed_queue_index(ledger);
     let message_queue_hash = lookup_or_zero(
         &ledger.rollup.message_rolling_hashes,
@@ -94,9 +93,11 @@ fn u64_to_bytes32_le(value: u64) -> [u8; 32] {
 }
 
 pub fn ensure_committed_batch(rollup: &RollupLedger, batch_index: u64) -> Result<[u8; 32]> {
-    rollup
-        .committed_batches
-        .get(&batch_index)
-        .copied()
-        .ok_or_else(|| anyhow!("batch {} not committed", batch_index))
+    if batch_index == rollup.misc_data.last_committed_batch_index {
+        Ok(rollup.last_committed_batch_hash)
+    } else if batch_index == rollup.misc_data.last_finalized_batch_index {
+        Ok(rollup.last_finalized_batch_hash)
+    } else {
+        Err(anyhow!("batch {} not committed", batch_index))
+    }
 }

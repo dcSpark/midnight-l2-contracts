@@ -71,10 +71,13 @@ export async function readCommittedBatch(
   index: bigint,
 ): Promise<Uint8Array> {
   const ledger = Bridge.ledger(contractState.data);
-  if (!ledger.L1_committedBatches.member(index)) {
-    throw new Error(`Committed batch not found for index ${index}`);
+  if (index === ledger.L1_miscData.lastCommittedBatchIndex) {
+    return ledger.L1_lastCommittedBatchHash;
   }
-  return ledger.L1_committedBatches.lookup(index);
+  if (index === ledger.L1_miscData.lastFinalizedBatchIndex) {
+    return ledger.L1_lastFinalizedBatchHash;
+  }
+  throw new Error(`Committed batch not found for index ${index}`);
 }
 
 export async function waitForBatchIndexUpdate(
@@ -187,14 +190,8 @@ export async function buildBatchPublicData(
   const prevBatchIndex = params.ledger.L1_miscData.lastFinalizedBatchIndex;
   const batchIndex = prevBatchIndex + 1n;
   const ledgerState = params.ledger;
-  if (!ledgerState.L1_committedBatches.member(prevBatchIndex)) {
-    throw new Error(`Committed batch not found for index ${prevBatchIndex}`);
-  }
-  if (!ledgerState.L1_finalizedStateRoots.member(prevBatchIndex)) {
-    throw new Error(`Finalized state root not found for index ${prevBatchIndex}`);
-  }
-  const prevBatchHash = ledgerState.L1_committedBatches.lookup(prevBatchIndex);
-  const prevStateRoot = ledgerState.L1_finalizedStateRoots.lookup(prevBatchIndex);
+  const prevBatchHash = ledgerState.L1_lastFinalizedBatchHash;
+  const prevStateRoot = ledgerState.L1_lastFinalizedStateRoot;
   const lastProcessedQueueIndex = computeLastProcessedQueueIndex(params.ledger);
   const messageQueueHash = ledgerState.L1_messageRollingHashes.member(
     lastProcessedQueueIndex,

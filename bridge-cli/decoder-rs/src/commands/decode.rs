@@ -147,8 +147,9 @@ struct RollupHead {
     signature_threshold: u8,
     sequencers: BTreeSet<[u8; 32]>,
     finalizers: BTreeSet<[u8; 32]>,
-    committed_batches: BTreeMap<u64, [u8; 32]>,
-    finalized_state_roots: BTreeMap<u64, [u8; 32]>,
+    last_committed_batch_hash: [u8; 32],
+    last_finalized_state_root: [u8; 32],
+    last_finalized_batch_hash: [u8; 32],
     withdraw_roots: BTreeMap<u64, [u8; 32]>,
     misc_data: RollupMiscData,
     first_cross_domain_message_index: u64,
@@ -188,8 +189,9 @@ fn decode_bridge_ledger(state: &ContractState<DefaultDB>) -> Result<BridgeLedger
         signature_threshold: rollup_head.signature_threshold,
         sequencers: rollup_head.sequencers,
         finalizers: rollup_head.finalizers,
-        committed_batches: rollup_head.committed_batches,
-        finalized_state_roots: rollup_head.finalized_state_roots,
+        last_committed_batch_hash: rollup_head.last_committed_batch_hash,
+        last_finalized_state_root: rollup_head.last_finalized_state_root,
+        last_finalized_batch_hash: rollup_head.last_finalized_batch_hash,
         withdraw_roots: rollup_head.withdraw_roots,
         misc_data: rollup_head.misc_data,
         first_cross_domain_message_index: rollup_head.first_cross_domain_message_index,
@@ -214,9 +216,9 @@ fn decode_bridge_ledger(state: &ContractState<DefaultDB>) -> Result<BridgeLedger
 
 fn decode_rollup_head(value: &StateValue) -> Result<RollupHead> {
     let items = expect_array(value).context("rollup header must be an array")?;
-    if items.len() != 12 {
+    if items.len() != 13 {
         return Err(anyhow!(
-            "rollup header expected 12 entries, found {}",
+            "rollup header expected 13 entries, found {}",
             items.len()
         ));
     }
@@ -234,13 +236,17 @@ fn decode_rollup_head(value: &StateValue) -> Result<RollupHead> {
     )?;
     let sequencers = decode_bytes32_set(iter_next(&mut iter, "sequencers")?.deref(), "sequencers")?;
     let finalizers = decode_bytes32_set(iter_next(&mut iter, "finalizers")?.deref(), "finalizers")?;
-    let committed_batches = decode_u64_bytes32_map(
-        iter_next(&mut iter, "committedBatches")?.deref(),
-        "committedBatches",
+    let last_committed_batch_hash = decode_bytes32_value(
+        iter_next(&mut iter, "lastCommittedBatchHash")?.deref(),
+        "lastCommittedBatchHash",
     )?;
-    let finalized_state_roots = decode_u64_bytes32_map(
-        iter_next(&mut iter, "finalizedStateRoots")?.deref(),
-        "finalizedStateRoots",
+    let last_finalized_state_root = decode_bytes32_value(
+        iter_next(&mut iter, "lastFinalizedStateRoot")?.deref(),
+        "lastFinalizedStateRoot",
+    )?;
+    let last_finalized_batch_hash = decode_bytes32_value(
+        iter_next(&mut iter, "lastFinalizedBatchHash")?.deref(),
+        "lastFinalizedBatchHash",
     )?;
     let withdraw_roots =
         decode_u64_bytes32_map(iter_next(&mut iter, "withdrawRoots")?.deref(), "withdrawRoots")?;
@@ -262,8 +268,9 @@ fn decode_rollup_head(value: &StateValue) -> Result<RollupHead> {
         signature_threshold,
         sequencers,
         finalizers,
-        committed_batches,
-        finalized_state_roots,
+        last_committed_batch_hash,
+        last_finalized_state_root,
+        last_finalized_batch_hash,
         withdraw_roots,
         misc_data,
         first_cross_domain_message_index,

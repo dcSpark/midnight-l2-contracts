@@ -31,17 +31,7 @@ pub async fn run(args: TestCostArgs) -> Result<()> {
         println!("Attempt {}/{}: commit-batch...", attempt, max);
 
         let ledger = load_bridge_ledger(&args.bridge).await?;
-        let parent_index = ledger.rollup.misc_data.last_committed_batch_index;
-        let parent_hash_bytes = ledger
-            .rollup
-            .committed_batches
-            .get(&parent_index)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no committed batch at index {} (cannot derive parent hash)",
-                    parent_index
-                )
-            })?;
+        let parent_hash_bytes = ledger.rollup.last_finalized_batch_hash;
         let parent_hash_str = hex::encode(parent_hash_bytes);
         let mut batch_public_data = batch::build_batch_public_data(&ledger, [0u8; 32])?;
         let batch_hash = batch::hash_batch_public_data_v1_full(&batch_public_data);

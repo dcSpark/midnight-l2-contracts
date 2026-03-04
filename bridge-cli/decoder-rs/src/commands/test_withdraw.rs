@@ -308,20 +308,9 @@ pub async fn run(args: TestWithdrawArgs) -> Result<()> {
     let current_ledger = load_bridge_ledger(&args.bridge).await?;
     let target_batch_index = current_ledger.rollup.misc_data.last_finalized_batch_index + 1;
     let batch_hash = if current_ledger.rollup.misc_data.last_committed_batch_index >= target_batch_index {
-        current_ledger
-            .rollup
-            .committed_batches
-            .get(&target_batch_index)
-            .copied()
-            .ok_or_else(|| anyhow!("expected committed batch at index {}", target_batch_index))?
+        current_ledger.rollup.last_committed_batch_hash
     } else {
-        let parent_index = current_ledger.rollup.misc_data.last_committed_batch_index;
-        let parent_hash = current_ledger
-            .rollup
-            .committed_batches
-            .get(&parent_index)
-            .copied()
-            .ok_or_else(|| anyhow!("missing parent committed batch at index {}", parent_index))?;
+        let parent_hash = current_ledger.rollup.last_finalized_batch_hash;
         let new_batch_hash = batch::random_bytes32();
         log_progress("sending commitBatch...");
         if let Some(base) = executor_base {
