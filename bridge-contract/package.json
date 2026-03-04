@@ -22,9 +22,8 @@
   },
   "scripts": {
     "compact:bridge": "compact compile +0.28.0 src/Bridge.compact src/managed/Bridge",
-    "compact:bridge-debug": "compact compile +0.28.0 src/BridgeDebug.compact src/managed/BridgeDebug",
     "compact:l2": "compact compile +0.28.0 src/L2Simulation.compact src/managed/L2Simulation",
-    "compact": "npm run compact:bridge && npm run compact:bridge-debug && npm run compact:l2",
+    "compact": "npm run compact:bridge && npm run compact:l2",
     "test": "vitest run",
     "test:compile": "npm run compact && vitest run",
     "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/Bridge.compact ./dist",
