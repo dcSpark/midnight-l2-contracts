@@ -1,18 +1,18 @@
-//! test-cost command: set verifier set, then run repeated commit-batch / finalize-batch
+//! test-many-batches command: set verifier set, then run repeated commit-batch / finalize-batch
 //! until a contract (or node) error is hit or a maximum number of attempts is reached.
 //! Used to experiment with contract cost (e.g. time_to_dismiss) as batches grow.
 
 use anyhow::Result;
 
 use crate::bridge::batch;
-use crate::cli::TestCostArgs;
+use crate::cli::TestManyBatchesArgs;
 use crate::commands::decode::load_bridge_ledger;
 use crate::commands::mock_batch::{read_latest_mock_batch, write_latest_mock_batch};
 use crate::executor_client;
 use crate::signatures;
 use crate::ts_cli;
 
-pub async fn run(args: TestCostArgs) -> Result<()> {
+pub async fn run(args: TestManyBatchesArgs) -> Result<()> {
     ts_cli::validate_contract_address(&args.bridge.contract)?;
 
     println!("Setting verifier set...");

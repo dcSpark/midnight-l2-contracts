@@ -22,7 +22,9 @@ pub enum CommandKind {
     ClaimL1Withdrawal(ClaimL1WithdrawalArgs),
     TestWithdraw(TestWithdrawArgs),
     /// Set verifier set, then run repeated commit-batch + finalize-batch until error or max attempts.
-    TestCost(TestCostArgs),
+    TestManyBatches(TestManyBatchesArgs),
+    /// Run repeated deposit until a contract (or node) error or max attempts.
+    TestManyDeposits(TestManyDepositsArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -222,7 +224,7 @@ pub struct TestWithdrawArgs {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct TestCostArgs {
+pub struct TestManyBatchesArgs {
     #[command(flatten)]
     pub bridge: BridgeCallArgs,
 
@@ -233,5 +235,31 @@ pub struct TestCostArgs {
     /// Nonce used for finalize-batch signing (base; signers get nonce, nonce+1, nonce+2). Decimal string.
     #[arg(long, env = "SIGNATURE_NONCE", default_value = "1")]
     pub signature_nonce: String,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct TestManyDepositsArgs {
+    #[command(flatten)]
+    pub bridge: BridgeCallArgs,
+
+    /// Amount in NIGHT per deposit (decimal string).
+    #[arg(long, default_value = "1")]
+    pub amount: String,
+
+    /// Optional L2 recipient (64 hex chars). Defaults to wallet coin public key in TS CLI.
+    #[arg(long)]
+    pub l2_recipient: Option<String>,
+
+    /// Optional gas limit for L2 (decimal string). Default in TS CLI: 100000.
+    #[arg(long)]
+    pub gas_limit: Option<String>,
+
+    /// Optional message timestamp (decimal string). Default in TS CLI: 0.
+    #[arg(long)]
+    pub timestamp: Option<String>,
+
+    /// Maximum number of deposits to submit before stopping successfully.
+    #[arg(long, default_value = "100")]
+    pub max_attempts: u32,
 }
 
