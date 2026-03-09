@@ -167,7 +167,7 @@ struct RollupTail {
     pending_withdrawals: BTreeMap<[u8; 32], u128>,
 }
 
-fn decode_bridge_ledger(state: &ContractState<DefaultDB>) -> Result<BridgeLedger> {
+pub fn decode_bridge_ledger(state: &ContractState<DefaultDB>) -> Result<BridgeLedger> {
     let root = state.data.get_ref();
     let root_parts = expect_array(root).context("bridge state root must be an array")?;
     if root_parts.len() != 3 {
@@ -741,7 +741,7 @@ async fn fetch_contract_state(client: &Client, indexer: &str, address: &str) -> 
     Ok(bytes)
 }
 
-fn deserialize_contract_state(bytes: &[u8]) -> Result<ContractState<DefaultDB>> {
+pub fn deserialize_contract_state(bytes: &[u8]) -> Result<ContractState<DefaultDB>> {
     tagged_deserialize(bytes).map_err(|err| anyhow!("failed to deserialize ContractState: {}", err))
 }
 
