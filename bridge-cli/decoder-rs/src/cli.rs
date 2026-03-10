@@ -221,6 +221,10 @@ pub struct TestWithdrawArgs {
     /// Poll delay in milliseconds.
     #[arg(long, default_value = "3000")]
     pub wait_delay_ms: u64,
+
+    /// Number of deposit-withdraw-claim loops to run. Default: 1.
+    #[arg(long)]
+    pub loops: Option<u32>,
 }
 
 #[derive(Args, Debug, Clone)]

@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use serde::Serialize;
+use serde::ser::SerializeMap;
+use serde::{Serialize, Serializer};
 
 #[derive(Debug, Serialize)]
 pub struct BridgeLedger {
@@ -34,6 +35,7 @@ pub struct RollupLedger {
     pub executed_l2_to_l1_messages: BTreeSet<[u8; 32]>,
     pub locked_night: u128,
     pub fee_vault: u128,
+    #[serde(serialize_with = "serialize_hex_key_map")]
     pub pending_withdrawals: BTreeMap<[u8; 32], u128>,
 }
 
@@ -54,6 +56,7 @@ pub struct CurvePoint {
 
 #[derive(Debug, Serialize)]
 pub struct L2GatewayLedger {
+    #[serde(serialize_with = "serialize_hex_key_map")]
     pub balances: BTreeMap<[u8; 32], u128>,
 }
 
@@ -93,4 +96,15 @@ impl fmt::Display for Deposit {
             hex::encode(self.data_hash)
         )
     }
+}
+
+fn serialize_hex_key_map<S: Serializer, V: Serialize>(
+    map: &BTreeMap<[u8; 32], V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut m = serializer.serialize_map(Some(map.len()))?;
+    for (k, v) in map {
+        m.serialize_entry(&hex::encode(k), v)?;
+    }
+    m.end()
 }

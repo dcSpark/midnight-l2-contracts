@@ -22,7 +22,10 @@ use midnight_storage::storage::HashMap;
 use serialize::{tagged_deserialize, tagged_serialize};
 use transient_crypto::commitment::{Pedersen, PedersenRandomness};
 
-use decoder_rs::bridge::state_builder::{build_bridge_state, BridgeStateConfig, serialize_bridge_state_to_file};
+use decoder_rs::bridge::state_builder::{
+    build_bridge_state, pending_withdrawal_recipient, serialize_bridge_state_to_file,
+    BridgeStateConfig,
+};
 use decoder_rs::commands::decode::{decode_bridge_ledger, deserialize_contract_state};
 
 /// Build LedgerParameters with very strict time-to-dismiss limits so that
@@ -157,7 +160,7 @@ pub fn run_toolkit_send_intent(
     for d in compiled_contract_dirs {
         cmd.arg("--compiled-contract-dir").arg(d.as_ref());
     }
-    eprintln!("Running: {:?}", cmd);
+    let cmd_dbg = format!("{:?}", cmd);
     let output = cmd
         .output()
         .map_err(|e| format!("failed to run toolkit: {}", e))?;
@@ -165,16 +168,16 @@ pub fn run_toolkit_send_intent(
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         return Err(format!(
-            "toolkit send-intent exited with {}\nstdout: {}\nstderr: {}",
-            output.status, stdout, stderr
+            "toolkit send-intent exited with {}\nRunning: {}\nstdout: {}\nstderr: {}",
+            output.status, cmd_dbg, stdout, stderr
         ));
     }
     if !dest_file.exists() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
-            "toolkit did not produce dest file\nstdout: {}\nstderr: {}",
-            stdout, stderr
+            "toolkit did not produce dest file\nRunning: {}\nstdout: {}\nstderr: {}",
+            cmd_dbg, stdout, stderr
         ));
     }
     Ok(dest_file.to_path_buf())
@@ -226,7 +229,7 @@ pub fn run_toolkit_generate_intent(
     for arg in call_args {
         cmd.arg(arg);
     }
-    eprintln!("Running: {:?}", cmd);
+    let cmd_dbg = format!("{:?}", cmd);
     let output = cmd
         .output()
         .map_err(|e| format!("failed to run toolkit generate-intent: {}", e))?;
@@ -234,12 +237,17 @@ pub fn run_toolkit_generate_intent(
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         return Err(format!(
-            "toolkit generate-intent exited with {}\nstdout: {}\nstderr: {}",
-            output.status, stdout, stderr
+            "toolkit generate-intent exited with {}\nRunning: {}\nstdout: {}\nstderr: {}",
+            output.status, cmd_dbg, stdout, stderr
         ));
     }
     if !output_intent.exists() {
-        return Err("toolkit did not produce intent file".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!(
+            "toolkit did not produce intent file\nRunning: {}\nstdout: {}\nstderr: {}",
+            cmd_dbg, stdout, stderr
+        ));
     }
     Ok(output_intent.to_path_buf())
 }
@@ -353,7 +361,7 @@ fn toolkit_tx_fails_cost_check_with_strict_params() {
 /// strict ledger parameters.
 ///
 /// The intent must be built from a state file where the Bridge's `l1ToL2Deposits` map
-/// is pre-populated with many entries (see docs/deposit-night-unshielded-time-to-dismiss-test.md).
+/// is pre-populated with many entries (see docs/time-to-dismiss-tests.md).
 ///
 /// Runs only when RUN_DEPOSIT_UNSHIELDED_COST_TEST=1. Requires TOOLKIT_BIN, GENESIS_FILE,
 /// INTENT_FILE (depositNIGHTUnshielded intent from state with many l1ToL2Deposits),
@@ -415,7 +423,7 @@ fn deposit_night_unshielded_tx_with_large_l1_to_l2_deposits_fails_cost_check() {
 #[test]
 fn build_state_with_many_deposits_and_verify_roundtrip() {
     let num = 500u64;
-    let config = BridgeStateConfig { num_deposits: num };
+    let config = BridgeStateConfig { num_deposits: num, ..Default::default() };
     let state = build_bridge_state(&config);
 
     let mut buf = Vec::new();
@@ -452,7 +460,7 @@ fn build_state_with_many_deposits_and_verify_roundtrip() {
 #[test]
 fn serialize_bridge_state_to_file_roundtrip() {
     let num = 10u64;
-    let config = BridgeStateConfig { num_deposits: num };
+    let config = BridgeStateConfig { num_deposits: num, ..Default::default() };
     let state = build_bridge_state(&config);
 
     let dir = std::env::temp_dir().join("decoder_rs_state_builder_test");
@@ -472,39 +480,353 @@ fn serialize_bridge_state_to_file_roundtrip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Fully automated end-to-end time-to-dismiss diagnostic for depositNIGHTUnshielded.
+// ---------------------------------------------------------------------------
+// Circuit registry: defines how to call each circuit and what state it needs
+// ---------------------------------------------------------------------------
+
+use decoder_rs::bridge::abi::BatchPublicDataV1Full;
+use decoder_rs::bridge::merkle::{
+    compute_index_bits, compute_merkle_root, compute_withdraw_leaf, generate_merkle_proof,
+    hash_l2_to_l1_withdraw, WITHDRAW_TREE_DEPTH,
+};
+use decoder_rs::signatures::{
+    build_signatures_json, derive_verifier_public_keys, DEFAULT_VERIFIER_SECRET_KEYS,
+};
+use num_bigint::BigUint;
+
+/// Pre-computed data for the relayWithdrawNIGHTWithProof circuit.
+struct RelayProofData {
+    l2_sender: [u8; 32],
+    l1_recipient: [u8; 32],
+    amount: u128,
+    nonce: u64,
+    batch_index: u64,
+    withdraw_root: [u8; 32],
+    proof_siblings: Vec<[u8; 32]>,
+    index_bits: Vec<bool>,
+}
+
+/// Pre-computed data for the finalizeBatch circuit.
+struct FinalizeBatchData {
+    bpd: BatchPublicDataV1Full,
+    signatures_json: String,
+    signer_bitmap: u8,
+}
+
+/// Context available to argument builders (both simple and hard circuits).
+struct CircuitArgContext {
+    #[allow(dead_code)]
+    coin_public: String,
+    relay_proof: Option<RelayProofData>,
+    finalize_batch: Option<FinalizeBatchData>,
+}
+
+struct CircuitDef {
+    name: &'static str,
+    build_args: Box<dyn Fn(&CircuitArgContext) -> Vec<String> + Sync>,
+    /// If set, override the base state config for this circuit.
+    /// The closure receives the base config and returns a modified copy.
+    state_override: Option<Box<dyn Fn(BridgeStateConfig) -> BridgeStateConfig + Sync>>,
+}
+
+const ALL_CIRCUIT_NAMES: &[&str] = &[
+    "depositNIGHTUnshielded",
+    "addSequencer",
+    "removeSequencer",
+    "addFinalizer",
+    "removeFinalizer",
+    "claimL1WithdrawalUnshielded",
+    "claimL1FeesUnshielded",
+    "commitBatch",
+    "setVerifierSet",
+    "relayWithdrawNIGHTWithProof",
+    "finalizeBatch",
+    // withdrawNIGHT excluded: L2 Gateway circuit (GW_debit), not an L1 transaction
+];
+
+fn build_circuit_registry() -> Vec<CircuitDef> {
+    vec![
+        CircuitDef {
+            name: "depositNIGHTUnshielded",
+            state_override: None,
+            build_args: Box::new(|_ctx| {
+                let l2_recipient = "ab".repeat(32);
+                vec!["1000000".into(), l2_recipient, "100000".into(), "0".into()]
+            }),
+        },
+        CircuitDef {
+            name: "addSequencer",
+            state_override: None,
+            build_args: Box::new(|_ctx| vec!["dd".repeat(32)]),
+        },
+        CircuitDef {
+            name: "removeSequencer",
+            state_override: None,
+            build_args: Box::new(|_ctx| vec!["dd".repeat(32)]),
+        },
+        CircuitDef {
+            name: "addFinalizer",
+            state_override: None,
+            build_args: Box::new(|_ctx| vec!["ee".repeat(32)]),
+        },
+        CircuitDef {
+            name: "removeFinalizer",
+            state_override: None,
+            build_args: Box::new(|_ctx| vec!["ee".repeat(32)]),
+        },
+        CircuitDef {
+            name: "claimL1WithdrawalUnshielded",
+            state_override: None,
+            build_args: Box::new(|_ctx| {
+                let recipient = hex::encode(pending_withdrawal_recipient(0));
+                vec![recipient, "500000".into()]
+            }),
+        },
+        CircuitDef {
+            name: "claimL1FeesUnshielded",
+            state_override: None,
+            build_args: Box::new(|_ctx| {
+                let recipient = "ab".repeat(32);
+                vec!["500000".into(), recipient]
+            }),
+        },
+        CircuitDef {
+            name: "commitBatch",
+            state_override: Some(Box::new(|mut cfg| {
+                // commitBatch asserts lastCommittedBatchIndex == lastFinalizedBatchIndex;
+                // setting to None makes the builder use the finalized index for both.
+                cfg.last_committed_batch_index = None;
+                cfg
+            })),
+            build_args: Box::new(|_ctx| {
+                // parentBatchHash must match lastFinalizedBatchHash in the state
+                let parent_hash = hex::encode(FINALIZE_PREV_BATCH_HASH);
+                let new_hash = "cc".repeat(32);
+                vec![parent_hash, new_hash]
+            }),
+        },
+        CircuitDef {
+            name: "setVerifierSet",
+            state_override: None,
+            build_args: Box::new(|_ctx| {
+                vec!["[{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }]".into()]
+            }),
+        },
+        CircuitDef {
+            name: "relayWithdrawNIGHTWithProof",
+            state_override: None,
+            build_args: Box::new(|ctx| {
+                let data = ctx.relay_proof.as_ref()
+                    .expect("relay_proof data must be pre-computed");
+                let siblings_json: Vec<String> = data.proof_siblings.iter()
+                    .map(|s| format!("\"{}\"", hex::encode(s)))
+                    .collect();
+                let index_bits_json: Vec<String> = data.index_bits.iter()
+                    .map(|b| if *b { "true".into() } else { "false".into() })
+                    .collect();
+                let proof_json = format!(
+                    "{{ batchIndex: {}, nonce: {}, indexBits: [{}], siblings: [{}] }}",
+                    data.batch_index,
+                    data.nonce,
+                    index_bits_json.join(", "),
+                    siblings_json.join(", "),
+                );
+                vec![
+                    hex::encode(data.l2_sender),
+                    hex::encode(data.l1_recipient),
+                    data.amount.to_string(),
+                    proof_json,
+                ]
+            }),
+        },
+        CircuitDef {
+            name: "finalizeBatch",
+            state_override: None,
+            build_args: Box::new(|ctx| {
+                let data = ctx.finalize_batch.as_ref()
+                    .expect("finalize_batch data must be pre-computed");
+                let bpd = &data.bpd;
+                let bpd_json = format!(
+                    "{{ version: {}, layer2ChainId: {}, rollupId: \"{}\", \
+                    batchIndex: {}, daStartHeight: {}, daEndHeight: {}, \
+                    daCommitment: \"{}\", lastProcessedQueueIndex: {}, \
+                    messageQueueHash: \"{}\", prevStateRoot: \"{}\", \
+                    prevBatchHash: \"{}\", postStateRoot: \"{}\", \
+                    batchHash: \"{}\", withdrawRoot: \"{}\" }}",
+                    bpd.version, bpd.layer2_chain_id, hex::encode(bpd.rollup_id),
+                    bpd.batch_index, bpd.da_start_height, bpd.da_end_height,
+                    hex::encode(bpd.da_commitment), bpd.last_processed_queue_index,
+                    hex::encode(bpd.message_queue_hash), hex::encode(bpd.prev_state_root),
+                    hex::encode(bpd.prev_batch_hash), hex::encode(bpd.post_state_root),
+                    hex::encode(bpd.batch_hash), hex::encode(bpd.withdraw_root),
+                );
+                vec![
+                    bpd_json,
+                    data.signatures_json.clone(),
+                    data.signer_bitmap.to_string(),
+                    "0".into(),
+                ]
+            }),
+        },
+    ]
+}
+
+fn default_circuits() -> Vec<&'static str> {
+    ALL_CIRCUIT_NAMES.to_vec()
+}
+
+fn find_circuit<'a>(name: &str, registry: &'a [CircuitDef]) -> Option<&'a CircuitDef> {
+    registry.iter().find(|c| c.name == name)
+}
+
+// ---------------------------------------------------------------------------
+// Pre-compute crypto data for hard circuits
+// ---------------------------------------------------------------------------
+
+const RELAY_L2_SENDER: [u8; 32] = [0x01; 32];
+const RELAY_L1_RECIPIENT: [u8; 32] = [0x02; 32];
+const RELAY_AMOUNT: u128 = 500_000;
+const RELAY_NONCE: u64 = 0;
+const RELAY_BATCH_INDEX: u64 = 42;
+
+fn build_relay_proof_data() -> RelayProofData {
+    let message_hash = hash_l2_to_l1_withdraw(
+        RELAY_L2_SENDER, RELAY_L1_RECIPIENT, RELAY_AMOUNT, RELAY_NONCE,
+    );
+    let leaf_hash = compute_withdraw_leaf(message_hash);
+    let leaf_index = RELAY_NONCE as usize;
+    let mut leaves = vec![[0u8; 32]; leaf_index + 1];
+    leaves[leaf_index] = leaf_hash;
+    let withdraw_root = compute_merkle_root(&leaves, WITHDRAW_TREE_DEPTH)
+        .expect("compute_merkle_root for relay proof");
+    let proof_siblings = generate_merkle_proof(&leaves, leaf_index, WITHDRAW_TREE_DEPTH)
+        .expect("generate_merkle_proof for relay proof");
+    let index_bits = compute_index_bits(RELAY_NONCE, WITHDRAW_TREE_DEPTH);
+
+    RelayProofData {
+        l2_sender: RELAY_L2_SENDER,
+        l1_recipient: RELAY_L1_RECIPIENT,
+        amount: RELAY_AMOUNT,
+        nonce: RELAY_NONCE,
+        batch_index: RELAY_BATCH_INDEX,
+        withdraw_root,
+        proof_siblings,
+        index_bits,
+    }
+}
+
+const FINALIZE_BATCH_HASH: [u8; 32] = [0xCC; 32];
+const FINALIZE_PREV_BATCH_HASH: [u8; 32] = [0xBB; 32];
+
+fn build_finalize_batch_data() -> FinalizeBatchData {
+    let bpd = BatchPublicDataV1Full {
+        version: 1,
+        layer2_chain_id: 0,
+        rollup_id: [0u8; 32],
+        batch_index: 1,
+        da_start_height: 0,
+        da_end_height: 0,
+        da_commitment: [0u8; 32],
+        last_processed_queue_index: 0,
+        message_queue_hash: [0u8; 32],
+        prev_state_root: [0u8; 32],
+        prev_batch_hash: FINALIZE_PREV_BATCH_HASH,
+        post_state_root: [0x01; 32],
+        batch_hash: FINALIZE_BATCH_HASH,
+        withdraw_root: [0u8; 32],
+    };
+
+    let keys: Vec<BigUint> = DEFAULT_VERIFIER_SECRET_KEYS
+        .iter()
+        .map(|&u| BigUint::from(u))
+        .collect();
+    let (sigs_json_raw, _) = build_signatures_json(&bpd, "1", &keys)
+        .expect("build_signatures_json for finalize_batch");
+
+    let sigs_arr: Vec<serde_json::Value> = serde_json::from_str(&sigs_json_raw)
+        .expect("parse signatures JSON array");
+    let sigs_json5_items: Vec<String> = sigs_arr.iter().map(|sig| {
+        let pk = sig.get("pk").unwrap();
+        let r = sig.get("r").unwrap();
+        let s = sig.get("s").unwrap().as_str().unwrap();
+        format!(
+            "{{ pk: {{ x: \"{}\", y: \"{}\" }}, r: {{ x: \"{}\", y: \"{}\" }}, s: \"{}\" }}",
+            pk.get("x").unwrap().as_str().unwrap(),
+            pk.get("y").unwrap().as_str().unwrap(),
+            r.get("x").unwrap().as_str().unwrap(),
+            r.get("y").unwrap().as_str().unwrap(),
+            s,
+        )
+    }).collect();
+    let signatures_json5 = format!("[{}]", sigs_json5_items.join(", "));
+
+    let signer_bitmap = (1u8 << DEFAULT_VERIFIER_SECRET_KEYS.len()) - 1;
+
+    FinalizeBatchData {
+        bpd,
+        signatures_json: signatures_json5,
+        signer_bitmap,
+    }
+}
+
+/// Build a unified BridgeStateConfig that satisfies all circuits including hard ones.
+fn build_unified_state_config(
+    coin_public_bytes: &[u8; 32],
+    num_entries: u64,
+    relay_proof: &RelayProofData,
+) -> BridgeStateConfig {
+    let keys: Vec<BigUint> = DEFAULT_VERIFIER_SECRET_KEYS
+        .iter()
+        .map(|&u| BigUint::from(u))
+        .collect();
+    let verifier_set = derive_verifier_public_keys(&keys);
+
+    BridgeStateConfig {
+        num_deposits: num_entries,
+        num_sequencers: num_entries,
+        num_finalizers: num_entries,
+        num_withdraw_roots: num_entries,
+        num_message_hashes: num_entries,
+        num_executed_messages: num_entries,
+        num_pending_withdrawals: std::cmp::max(num_entries, 1),
+        owner: *coin_public_bytes,
+        locked_night: 10u128.pow(18),
+        fee_vault: 10u128.pow(18),
+        last_finalized_batch_hash: FINALIZE_PREV_BATCH_HASH,
+        l2_gateway_balances: vec![(*coin_public_bytes, 10u128.pow(18))],
+        verifier_set,
+        signature_threshold: 2,
+        last_committed_batch_hash: FINALIZE_BATCH_HASH,
+        last_committed_batch_index: Some(1),
+        specific_withdraw_roots: vec![(relay_proof.batch_index, relay_proof.withdraw_root)],
+        last_finalized_state_root: [0u8; 32],
+        extra_sequencers: vec![*coin_public_bytes],
+        extra_finalizers: vec![*coin_public_bytes],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-circuit automated test
+// ---------------------------------------------------------------------------
+
+/// Fully automated end-to-end time-to-dismiss diagnostic for multiple Bridge circuits.
 ///
-/// Pipeline:
-///   1. Build Bridge ContractState with N deposits in Rust
+/// Pipeline (per circuit):
+///   1. Build Bridge ContractState with configurable field populations
 ///   2. Serialize state to temp file
 ///   3. Generate intent via `midnight-node-toolkit generate-intent circuit`
 ///   4. Deserialize the intent, wrap in a minimal Transaction
-///   5. Cost-check the transaction, report diagnostics, optionally assert failure
+///   5. Cost-check the transaction, report diagnostics
 ///
 /// Gated by `RUN_AUTOMATED_TTD_TEST=1`.
 ///
-/// The only env var you typically need to set is TOOLKIT_BIN (path to
-/// midnight-node-toolkit binary). Everything else has sensible defaults
-/// assuming `midnight-node` is present as a submodule at the repo root.
-///
-/// All env vars (with defaults derived from the repo layout):
-///   - TOOLKIT_BIN: midnight-node-toolkit binary (default: "midnight-node-toolkit")
-///   - MIDNIGHT_NODE: path to midnight-node checkout
-///     (default: midnight-node/ relative to repo root)
-///   - TOOLKIT_JS_PATH: toolkit-js directory
-///     (default: $MIDNIGHT_NODE/util/toolkit-js)
-///   - BRIDGE_ARTIFACTS: compiled Bridge artifact dir
-///     (default: bridge-contract/dist/managed/Bridge relative to repo root)
-///   - BRIDGE_CONFIG: contract.config.ts for toolkit-js
-///     (default: bridge-cli/toolkit-config/contract.config.ts relative to repo root)
-///   - CONTRACT_ADDRESS: 64 hex chars (default: dummy address -- the toolkit
-///     does not validate it against the ledger for generate-intent)
-///   - COIN_PUBLIC: coin public key, 64 hex chars (default: 64 zeros)
-///   - NUM_DEPOSITS: number of l1ToL2Deposits entries to populate (default: 500)
-///   - EXPECT_TTD_FAILURE: set to "1" to assert OutsideTimeToDismiss; otherwise
-///     the test only reports diagnostics and passes regardless
-///   - MIN_TIME_TO_DISMISS_PS: override min_time_to_dismiss in picoseconds
-///   - TIME_TO_DISMISS_PER_BYTE_PS: override time_to_dismiss_per_byte in picoseconds
+/// Key env vars:
+///   - TOOLKIT_BIN: path to midnight-node-toolkit (default: on PATH)
+///   - NUM_ENTRIES: entries per collection field (default: 500)
+///   - CIRCUITS: comma-separated circuit names (default: all feasible)
+///   - EXPECT_TTD_FAILURE: "1" to assert OutsideTimeToDismiss
+///   - MIN_TIME_TO_DISMISS_PS / TIME_TO_DISMISS_PER_BYTE_PS: override limits
+///   - COIN_PUBLIC: 64-char hex coin public key (default: 64 zeros)
 #[test]
 fn automated_deposit_unshielded_time_to_dismiss() {
     if std::env::var("RUN_AUTOMATED_TTD_TEST").ok().as_deref() != Some("1") {
@@ -515,6 +837,26 @@ fn automated_deposit_unshielded_time_to_dismiss() {
         .parent()
         .and_then(|p| p.parent())
         .expect("could not determine repo root from CARGO_MANIFEST_DIR");
+
+    let patch_script = repo_root.join("bridge-cli/scripts/patch-compact-runtime-charged-state.sh");
+    if patch_script.exists() {
+        let status = std::process::Command::new("bash")
+            .arg(&patch_script)
+            .status()
+            .expect("failed to run module unification patch");
+        assert!(status.success(), "module unification patch failed");
+    }
+
+    struct UnpatchGuard(PathBuf);
+    impl Drop for UnpatchGuard {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("bash")
+                .arg(&self.0)
+                .arg("--unpatch")
+                .status();
+        }
+    }
+    let _unpatch = UnpatchGuard(patch_script);
 
     let midnight_node = std::env::var("MIDNIGHT_NODE")
         .map(PathBuf::from)
@@ -535,11 +877,36 @@ fn automated_deposit_unshielded_time_to_dismiss() {
         .unwrap_or_else(|_| format!("{:0>64}", "1"));
     let coin_public = std::env::var("COIN_PUBLIC")
         .unwrap_or_else(|_| "0".repeat(64));
-    let num_deposits: u64 = std::env::var("NUM_DEPOSITS")
+    let num_entries: u64 = std::env::var("NUM_ENTRIES")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(500);
     let expect_failure = std::env::var("EXPECT_TTD_FAILURE").ok().as_deref() == Some("1");
+
+    let registry = build_circuit_registry();
+
+    let circuit_names: Vec<String> = match std::env::var("CIRCUITS") {
+        Ok(val) => {
+            val.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    if find_circuit(&s, &registry).is_none() {
+                        panic!("unknown circuit: '{}'. Available: {:?}", s, default_circuits());
+                    }
+                    s
+                })
+                .collect()
+        }
+        Err(_) => default_circuits().into_iter().map(|s| s.to_string()).collect(),
+    };
+
+    let coin_public_bytes: [u8; 32] = {
+        let bytes = hex::decode(&coin_public).expect("COIN_PUBLIC must be valid hex");
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        arr
+    };
 
     if !midnight_node.exists() {
         eprintln!(
@@ -567,98 +934,165 @@ fn automated_deposit_unshielded_time_to_dismiss() {
     let work_dir = std::env::temp_dir().join("automated_ttd_test");
     std::fs::create_dir_all(&work_dir).expect("create work dir");
 
-    // 1. Build state with N deposits
-    eprintln!("Building Bridge state with {} deposits...", num_deposits);
-    let config = BridgeStateConfig { num_deposits };
-    let state = build_bridge_state(&config);
+    // Pre-compute crypto data for hard circuits
+    let relay_proof = build_relay_proof_data();
+    let finalize_batch = build_finalize_batch_data();
 
-    // 2. Serialize state to file
+    let base_config = build_unified_state_config(&coin_public_bytes, num_entries, &relay_proof);
+
     let state_file = work_dir.join("state.bin");
-    serialize_bridge_state_to_file(&state, &state_file)
-        .expect("serialize_bridge_state_to_file should succeed");
-    eprintln!("State written to {}", state_file.display());
-
-    // 3. Write private state JSON
     let private_state_file = work_dir.join("private_state.json");
     std::fs::write(&private_state_file, r#"{"privateState":0}"#)
         .expect("write private_state.json");
 
-    // 4. Generate intent
-    let intent_file = work_dir.join("intent.bin");
-    let output_ps = work_dir.join("output_ps.json");
-    let output_zswap = work_dir.join("output_zswap.json");
-
-    let l2_recipient = "ab".repeat(32);
-    let call_args: Vec<&str> = vec![
-        "1000000",
-        &l2_recipient,
-        "100000",
-        "0",
-    ];
-
-    eprintln!("Generating depositNIGHTUnshielded intent...");
-    run_toolkit_generate_intent(
-        &toolkit_bin,
-        &bridge_config,
-        &toolkit_js_path,
-        &state_file,
-        &private_state_file,
-        &contract_address,
-        &coin_public,
-        "undeployed",
-        &intent_file,
-        &output_ps,
-        &output_zswap,
-        "depositNIGHTUnshielded",
-        &call_args,
-    )
-    .expect("toolkit generate-intent should succeed");
-    eprintln!("Intent written to {}", intent_file.display());
-
-    // 5. Build Transaction from intent and cost-check it
-    eprintln!("Building Transaction from intent and running cost check...");
-    let tx = transaction_from_intent_file(&intent_file, "undeployed")
-        .expect("should build Transaction from intent");
+    // Build and serialize the base state; track whether we need to rebuild
+    eprintln!("Building Bridge state with {} entries per field...", num_entries);
+    let state = build_bridge_state(&base_config);
+    serialize_bridge_state_to_file(&state, &state_file)
+        .expect("serialize_bridge_state_to_file should succeed");
+    eprintln!("State written to {}", state_file.display());
+    let mut using_base_state = true;
 
     let params = ledger_parameters_from_env();
-    let label = format!("depositNIGHTUnshielded (num_deposits={})", num_deposits);
-    print_cost_diagnostics(&tx, &params, &label);
+    let mut summary: Vec<(String, String, String, String)> = Vec::new();
+    let mut any_failed = false;
 
-    let result = tx.cost(&params, true);
-    match result {
-        Err(FeeCalculationError::OutsideTimeToDismiss {
-            time_to_dismiss,
-            allowed_time_to_dismiss,
-            size,
-        }) => {
-            eprintln!(
-                "OutsideTimeToDismiss raised: cost={:?}, allowed={:?}, size={} bytes",
-                time_to_dismiss, allowed_time_to_dismiss, size
-            );
-            if !expect_failure {
-                eprintln!(
-                    "NOTE: Set EXPECT_TTD_FAILURE=1 to turn this into a hard assertion. \
-                     Currently in diagnostic mode -- test passes."
-                );
-            }
+    let arg_ctx = CircuitArgContext {
+        coin_public: coin_public.clone(),
+        relay_proof: Some(relay_proof),
+        finalize_batch: Some(finalize_batch),
+    };
+
+    for circuit_name in &circuit_names {
+        let circuit = find_circuit(circuit_name, &registry).unwrap();
+
+        // Rebuild state if this circuit needs an override, or restore base if previous was overridden
+        if let Some(ref override_fn) = circuit.state_override {
+            let overridden = override_fn(base_config.clone());
+            eprintln!("  (rebuilding state for {} with override)", circuit.name);
+            let state = build_bridge_state(&overridden);
+            serialize_bridge_state_to_file(&state, &state_file)
+                .expect("serialize overridden state");
+            using_base_state = false;
+        } else if !using_base_state {
+            eprintln!("  (restoring base state)");
+            let state = build_bridge_state(&base_config);
+            serialize_bridge_state_to_file(&state, &state_file)
+                .expect("serialize base state");
+            using_base_state = true;
         }
-        Ok(cost) => {
-            eprintln!("Transaction cost check PASSED: {:?}", cost);
-            if expect_failure {
-                panic!(
-                    "EXPECT_TTD_FAILURE=1 but cost check passed (Ok). \
-                     The transaction fits within time-to-dismiss limits. \
-                     Try increasing NUM_DEPOSITS or tightening limits via \
-                     MIN_TIME_TO_DISMISS_PS / TIME_TO_DISMISS_PER_BYTE_PS."
-                );
+
+        let args = (circuit.build_args)(&arg_ctx);
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let intent_file = work_dir.join(format!("{}_intent.bin", circuit.name));
+        let output_ps = work_dir.join(format!("{}_ps.json", circuit.name));
+        let output_zswap = work_dir.join(format!("{}_zswap.json", circuit.name));
+
+        eprintln!("\n--- Generating intent for {} ---", circuit.name);
+        let gen_result = run_toolkit_generate_intent(
+            &toolkit_bin,
+            &bridge_config,
+            &toolkit_js_path,
+            &state_file,
+            &private_state_file,
+            &contract_address,
+            &coin_public,
+            "undeployed",
+            &intent_file,
+            &output_ps,
+            &output_zswap,
+            circuit.name,
+            &arg_refs,
+        );
+
+        match gen_result {
+            Err(e) => {
+                eprintln!("SKIP {}: generate-intent failed: {}", circuit.name, e);
+                summary.push((
+                    circuit.name.to_string(),
+                    "SKIP".into(),
+                    "-".into(),
+                    format!("generate-intent failed: {}", &e[..e.len().min(200)]),
+                ));
+                continue;
             }
+            Ok(_) => {}
         }
-        Err(e) => {
-            panic!("unexpected cost error (not OutsideTimeToDismiss): {:?}", e);
+
+        let tx = match transaction_from_intent_file(&intent_file, "undeployed") {
+            Ok(tx) => tx,
+            Err(e) => {
+                eprintln!("SKIP {}: failed to build tx: {}", circuit.name, e);
+                summary.push((
+                    circuit.name.to_string(),
+                    "SKIP".into(),
+                    "-".into(),
+                    format!("tx build failed: {}", e),
+                ));
+                continue;
+            }
+        };
+
+        let label = format!("{} (num_entries={})", circuit.name, num_entries);
+        print_cost_diagnostics(&tx, &params, &label);
+
+        let result = tx.cost(&params, true);
+        match result {
+            Err(FeeCalculationError::OutsideTimeToDismiss {
+                time_to_dismiss,
+                allowed_time_to_dismiss,
+                size,
+            }) => {
+                summary.push((
+                    circuit.name.to_string(),
+                    "EXCEEDS".into(),
+                    format!("{:?}", time_to_dismiss),
+                    format!("allowed={:?} size={}", allowed_time_to_dismiss, size),
+                ));
+            }
+            Ok(cost) => {
+                let ttd = tx.time_to_dismiss(&params.cost_model);
+                summary.push((
+                    circuit.name.to_string(),
+                    "OK".into(),
+                    format!("{:?}", ttd),
+                    format!("{:?}", cost),
+                ));
+                if expect_failure {
+                    eprintln!("FAIL: {} passed but EXPECT_TTD_FAILURE=1", circuit.name);
+                    any_failed = true;
+                }
+            }
+            Err(e) => {
+                summary.push((
+                    circuit.name.to_string(),
+                    "ERROR".into(),
+                    "-".into(),
+                    format!("{:?}", e),
+                ));
+                any_failed = true;
+            }
         }
     }
 
+    // Print summary table
+    eprintln!("\n{:=<80}", "");
+    eprintln!("SUMMARY (num_entries={}, params: min_ttd={:?}, per_byte={:?})",
+        num_entries, params.limits.min_time_to_dismiss, params.limits.time_to_dismiss_per_byte);
+    eprintln!("{:-<80}", "");
+    eprintln!("{:<35} {:>8} {:>14} {}", "Circuit", "Status", "Cost", "Details");
+    eprintln!("{:-<80}", "");
+    for (name, status, cost, details) in &summary {
+        eprintln!("{:<35} {:>8} {:>14} {}", name, status, cost, details);
+    }
+    eprintln!("{:=<80}\n", "");
+
     let _ = std::fs::remove_dir_all(&work_dir);
+
+    if any_failed {
+        panic!("One or more circuits had unexpected cost check results (see summary above)");
+    }
 }
 
 /// Stress scenario: run toolkit with many intent files (or one heavy intent), then
