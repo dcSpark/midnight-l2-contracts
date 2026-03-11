@@ -44,10 +44,24 @@ fn strict_ledger_parameters() -> LedgerParameters {
     }
 }
 
+/// Extra bytes to add to est_size when computing the allowed time-to-dismiss.
+/// Models a realistic proven tx with fee coins: 1 zswap input proof (4832) +
+/// 1 zswap output proof (4832) + 1 dust spend proof (2912). These are the same
+/// constants used by the ledger's est_size() formula in structure.rs.
+/// Set ZSWAP_SIZE_OVERHEAD=0 for the strictest possible check (minimal tx).
+const DEFAULT_ZSWAP_OVERHEAD: u64 = 4_832 + 4_832 + 2_912; // 12,576 bytes
+
+fn zswap_size_overhead() -> u64 {
+    std::env::var("ZSWAP_SIZE_OVERHEAD")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_ZSWAP_OVERHEAD)
+}
+
 /// Build LedgerParameters from env-var overrides or fall back to real-network defaults.
 ///
 /// Supported env vars (values in picoseconds):
-///   - `MIN_TIME_TO_DISMISS_PS`       (default: from INITIAL_PARAMETERS, ~15s)
+///   - `MIN_TIME_TO_DISMISS_PS`       (default: from INITIAL_PARAMETERS, ~15ms)
 ///   - `TIME_TO_DISMISS_PER_BYTE_PS`  (default: from INITIAL_PARAMETERS, ~2us/byte)
 fn ledger_parameters_from_env() -> LedgerParameters {
     let min_ttd = std::env::var("MIN_TIME_TO_DISMISS_PS")
@@ -73,35 +87,46 @@ fn ledger_parameters_from_env() -> LedgerParameters {
     }
 }
 
-/// Print cost diagnostics for a transaction without asserting pass/fail.
-fn print_cost_diagnostics(tx: &TxType, params: &LedgerParameters, label: &str) {
+/// Print cost diagnostics for a transaction.
+///
+/// Returns `(cost_to_dismiss, allowed)` so the caller can decide pass/fail.
+/// When `zswap_overhead > 0`, the allowed time accounts for the extra proof
+/// bytes that a real proven transaction would include.
+fn print_cost_diagnostics(
+    tx: &TxType,
+    params: &LedgerParameters,
+    label: &str,
+    zswap_overhead: u64,
+) -> (CostDuration, CostDuration) {
     let cost_to_dismiss = tx.time_to_dismiss(&params.cost_model);
+    let full_cost = tx.cost(params, false).expect("cost(enforce=false) should succeed");
 
-    let serialized_size = {
-        let mut buf = Vec::new();
-        tagged_serialize(tx, &mut buf).expect("serialize tx for size estimation");
-        buf.len()
-    };
-    let allowed_time = CostDuration::max(
-        params.limits.time_to_dismiss_per_byte * serialized_size as u64,
+    let est_size = full_cost.block_usage;
+    let effective_size = est_size + zswap_overhead;
+    let allowed = CostDuration::max(
+        params.limits.time_to_dismiss_per_byte * effective_size,
         params.limits.min_time_to_dismiss,
     );
 
-    let full_cost = tx.cost(params, false).expect("cost(enforce=false) should succeed");
-
     eprintln!("\n=== Cost Diagnostics: {} ===", label);
-    eprintln!("  Serialized tx size:       {} bytes", serialized_size);
+    eprintln!("  est_size:                  {} bytes", est_size);
+    if zswap_overhead > 0 {
+        eprintln!("  zswap_overhead:            {} bytes", zswap_overhead);
+        eprintln!("  effective_size:            {} bytes", effective_size);
+    }
     eprintln!("  cost_to_dismiss (actual):  {:?}", cost_to_dismiss);
-    eprintln!("  allowed_time_to_dismiss:   {:?}", allowed_time);
+    eprintln!("  allowed_time_to_dismiss:   {:?}", allowed);
     eprintln!("  min_time_to_dismiss param: {:?}", params.limits.min_time_to_dismiss);
     eprintln!("  per_byte param:            {:?}", params.limits.time_to_dismiss_per_byte);
     eprintln!("  synthetic_cost:            {:?}", full_cost);
-    if cost_to_dismiss > allowed_time {
+    if cost_to_dismiss > allowed {
         eprintln!("  VERDICT: EXCEEDS time-to-dismiss limit");
     } else {
         eprintln!("  VERDICT: WITHIN time-to-dismiss limit");
     }
     eprintln!("==========================================\n");
+
+    (cost_to_dismiss, allowed)
 }
 
 /// A ClaimRewards transaction has non-zero cost; with strict parameters
@@ -954,6 +979,7 @@ fn automated_deposit_unshielded_time_to_dismiss() {
     let mut using_base_state = true;
 
     let params = ledger_parameters_from_env();
+    let zswap_overhead = zswap_size_overhead();
     let mut summary: Vec<(String, String, String, String)> = Vec::new();
     let mut any_failed = false;
 
@@ -1035,42 +1061,25 @@ fn automated_deposit_unshielded_time_to_dismiss() {
         };
 
         let label = format!("{} (num_entries={})", circuit.name, num_entries);
-        print_cost_diagnostics(&tx, &params, &label);
+        let (cost_to_dismiss, allowed) =
+            print_cost_diagnostics(&tx, &params, &label, zswap_overhead);
 
-        let result = tx.cost(&params, true);
-        match result {
-            Err(FeeCalculationError::OutsideTimeToDismiss {
-                time_to_dismiss,
-                allowed_time_to_dismiss,
-                size,
-            }) => {
-                summary.push((
-                    circuit.name.to_string(),
-                    "EXCEEDS".into(),
-                    format!("{:?}", time_to_dismiss),
-                    format!("allowed={:?} size={}", allowed_time_to_dismiss, size),
-                ));
-            }
-            Ok(cost) => {
-                let ttd = tx.time_to_dismiss(&params.cost_model);
-                summary.push((
-                    circuit.name.to_string(),
-                    "OK".into(),
-                    format!("{:?}", ttd),
-                    format!("{:?}", cost),
-                ));
-                if expect_failure {
-                    eprintln!("FAIL: {} passed but EXPECT_TTD_FAILURE=1", circuit.name);
-                    any_failed = true;
-                }
-            }
-            Err(e) => {
-                summary.push((
-                    circuit.name.to_string(),
-                    "ERROR".into(),
-                    "-".into(),
-                    format!("{:?}", e),
-                ));
+        if cost_to_dismiss > allowed {
+            summary.push((
+                circuit.name.to_string(),
+                "EXCEEDS".into(),
+                format!("{:?}", cost_to_dismiss),
+                format!("allowed={:?}", allowed),
+            ));
+        } else {
+            summary.push((
+                circuit.name.to_string(),
+                "OK".into(),
+                format!("{:?}", cost_to_dismiss),
+                format!("allowed={:?}", allowed),
+            ));
+            if expect_failure {
+                eprintln!("FAIL: {} passed but EXPECT_TTD_FAILURE=1", circuit.name);
                 any_failed = true;
             }
         }

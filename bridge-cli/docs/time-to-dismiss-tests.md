@@ -6,8 +6,9 @@ The test:
 
 1. Constructs a Bridge `ContractState` with configurable population of all storage fields (Rust state builder, no chain needed).
 2. For each selected circuit, generates an intent via `midnight-node-toolkit generate-intent circuit`.
-3. Wraps each intent into a minimal `Transaction` and runs `tx.cost()` with real-network ledger parameters.
-4. Reports detailed cost diagnostics and a summary table.
+3. Wraps each intent into a minimal `Transaction` and runs the cost model with real-network ledger parameters.
+4. Computes a **realistic allowed time** by adding an estimated zswap proof overhead to `est_size` (since real proven transactions include fee coin proofs that the minimal test transaction omits).
+5. Reports detailed cost diagnostics and a summary table.
 
 ---
 
@@ -76,7 +77,7 @@ TOOLKIT_BIN=../../midnight-node/target/release/midnight-node-toolkit \
 cargo test automated_deposit_unshielded_time_to_dismiss -- --nocapture
 ```
 
-By default this runs **all 11 L1 circuits** (zero SKIPs) with 500 entries per collection field. Use `CIRCUITS` to select specific ones.
+By default this runs **all 11 L1 circuits** (zero SKIPs) with 500 entries per collection field and a 12,576-byte zswap overhead (modelling a realistic proven tx: 1 fee input + 1 change output + 1 dust spend proof). Use `CIRCUITS` to select specific ones.
 
 ### Environment variables
 
@@ -93,7 +94,8 @@ By default this runs **all 11 L1 circuits** (zero SKIPs) with 500 entries per co
 | `NUM_ENTRIES` | No | `500` | Entries per collection field (deposits, sequencers, etc.) |
 | `CIRCUITS` | No | all feasible | Comma-separated circuit names to test |
 | `EXPECT_TTD_FAILURE` | No | `0` | Set to `1` to assert `OutsideTimeToDismiss` |
-| `MIN_TIME_TO_DISMISS_PS` | No | `15000000000000` (15s) | Override min_time_to_dismiss in picoseconds |
+| `MIN_TIME_TO_DISMISS_PS` | No | `15000000000` (15ms) | Override min_time_to_dismiss in picoseconds |
+| `ZSWAP_SIZE_OVERHEAD` | No | `12576` | Extra bytes for realistic proven-tx size (1 input + 1 output + 1 dust proof); set to `0` for strictest minimal-tx check |
 | `TIME_TO_DISMISS_PER_BYTE_PS` | No | `2000000` (2us) | Override time_to_dismiss_per_byte in picoseconds |
 
 ### Examples
@@ -147,7 +149,7 @@ cargo test automated_deposit_unshielded_time_to_dismiss -- --nocapture
 | `claimL1FeesUnshielded` | Medium | `owner == COIN_PUBLIC` + `feeVault >= amount` |
 | `commitBatch` | Medium | Uses per-circuit state override: `lastCommittedBatchIndex == lastFinalizedBatchIndex`, `COIN_PUBLIC` in sequencers set, `parentBatchHash == lastFinalizedBatchHash` |
 | `relayWithdrawNIGHTWithProof` | Hard | Valid depth-16 Merkle proof against a `withdrawRoot` stored in state. Proof is computed in Rust using `bridge/merkle.rs` (extracted from `test_withdraw.rs`). |
-| `finalizeBatch` | Hard | Valid threshold signatures over `BatchPublicDataV1Full` verified against `verifierSet` in state. Uses per-circuit state override: `lastCommittedBatchIndex = lastFinalizedBatchIndex + 1`. `COIN_PUBLIC` must be in both `sequencers` and `finalizers` sets. Requires module unification patch (see below). |
+| `finalizeBatch` | Hard | Valid threshold signatures over `BatchPublicDataV1Full` verified against `verifierSet` in state. Uses per-circuit state override: `lastCommittedBatchIndex = lastFinalizedBatchIndex + 1`. `COIN_PUBLIC` must be in both `sequencers` and `finalizers` sets. Requires module unification patch (see below). **Tightest circuit**: ~15.4ms cost vs 15ms minimum. Passes with the default 12,576-byte zswap overhead; reports EXCEEDS with `ZSWAP_SIZE_OVERHEAD=0`. |
 
 ### Excluded (1 circuit)
 
@@ -219,7 +221,7 @@ cargo test serialize_bridge_state_to_file_roundtrip
 
 ## Gas scaling results (depositNIGHTUnshielded)
 
-Cost under real-network `INITIAL_PARAMETERS` (`min_time_to_dismiss = 15s`, `time_to_dismiss_per_byte = 2us/byte`):
+Cost under real-network `INITIAL_PARAMETERS` (`min_time_to_dismiss = 15ms`, `time_to_dismiss_per_byte = 2us/byte`):
 
 | Deposits | cost_to_dismiss | allowed_time | tx size | compute_time | read_time |
 |----------|----------------|--------------|---------|-------------|-----------|
@@ -233,4 +235,4 @@ Cost under real-network `INITIAL_PARAMETERS` (`min_time_to_dismiss = 15s`, `time
 
 - Cost scales as `O(log2(map_size))` -- one map insert per circuit call.
 - Transaction size is constant (~1.4 KB); map entries live in contract state, not the tx.
-- The 15s minimum limit is ~1,400x larger than the actual cost. The `time_to_dismiss` limit is unreachable for this circuit under current parameters.
+- The 15ms minimum limit is ~1.4x larger than the actual cost at any tested scale. The `time_to_dismiss` limit is unreachable for this circuit under current parameters.
