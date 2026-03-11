@@ -21,5 +21,7 @@ async fn main() -> Result<()> {
         }
         CommandKind::ClaimL1Withdrawal(args) => commands::claim_l1_withdrawal::run(args).await,
         CommandKind::TestWithdraw(args) => commands::test_withdraw::run(args).await,
+        CommandKind::TestManyBatches(args) => commands::test_many_batches::run(args).await,
+        CommandKind::TestManyDeposits(args) => commands::test_many_deposits::run(args).await,
     }
 }

@@ -37,6 +37,7 @@ export interface StateResult {
   lastCommittedBatchHash: string | null;
   lastFinalizedBatchIndex: string;
   lastFinalizedBatchHash: string | null;
+  lastFinalizedStateRoot: string | null;
   rollingHashAtLatestIndex: string | null;
   deposits: Record<string, ReturnType<typeof formatDeposit>>;
 }
@@ -58,14 +59,9 @@ export async function runState(
   const lastCommittedBatchIndex = ledger.L1_miscData.lastCommittedBatchIndex;
   const nextIndex = ledger.L1_nextCrossDomainMessageIndex;
 
-  const lastCommittedBatchHash =
-    ledger.L1_committedBatches.member(lastCommittedBatchIndex) ?
-      ledger.L1_committedBatches.lookup(lastCommittedBatchIndex) :
-      null;
-  const lastFinalizedBatchHash =
-    ledger.L1_committedBatches.member(lastFinalizedBatchIndex) ?
-      ledger.L1_committedBatches.lookup(lastFinalizedBatchIndex) :
-      null;
+  const lastCommittedBatchHash = ledger.L1_lastCommittedBatchHash;
+  const lastFinalizedBatchHash = ledger.L1_lastFinalizedBatchHash;
+  const lastFinalizedStateRoot = ledger.L1_lastFinalizedStateRoot;
 
   let rollingHashAtNextIndex: Uint8Array | undefined;
   const rollingHashIndex = nextIndex > 0n ? nextIndex - 1n : 0n;
@@ -89,6 +85,7 @@ export async function runState(
     lastCommittedBatchHash: lastCommittedBatchHash ? toHex(lastCommittedBatchHash) : null,
     lastFinalizedBatchIndex: lastFinalizedBatchIndex.toString(),
     lastFinalizedBatchHash: lastFinalizedBatchHash ? toHex(lastFinalizedBatchHash) : null,
+    lastFinalizedStateRoot: lastFinalizedStateRoot ? toHex(lastFinalizedStateRoot) : null,
     rollingHashAtLatestIndex: rollingHashAtNextIndex
       ? toHex(rollingHashAtNextIndex)
       : null,

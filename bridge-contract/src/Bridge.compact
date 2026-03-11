@@ -56,8 +56,9 @@ export {
   L1_signatureThreshold,
   L1_sequencers,
   L1_finalizers,
-  L1_committedBatches,
-  L1_finalizedStateRoots,
+  L1_lastCommittedBatchHash,
+  L1_lastFinalizedStateRoot,
+  L1_lastFinalizedBatchHash,
   L1_withdrawRoots,
   L1_miscData,
   L1_firstCrossDomainMessageIndex,
@@ -277,31 +278,6 @@ export circuit removeFinalizer(f_: Bytes<32>): [] { L1_removeFinalizer(disclose(
 export circuit setVerifierSet(newSet_: Vector<3, NativePoint>): [] { L1_setVerifierSet(disclose(newSet_)); }
 
 // L1 queries
-// export circuit lastFinalizedBatchIndex(): Uint<64> { return L1_getLastFinalizedBatchIndex(); }
-// export circuit lastCommittedBatchIndex(): Uint<64> { return L1_getLastCommittedBatchIndex(); }
-
-// export circuit isBatchFinalized(batchIndex_: Uint<64>): Boolean { return L1_isBatchFinalized(disclose(batchIndex_)); }
-
-// export circuit getCommittedBatch(batchIndex_: Uint<64>): Bytes<32> { return L1_getCommittedBatch(disclose(batchIndex_)); }
-// export circuit getFinalizedStateRoot(batchIndex_: Uint<64>): Bytes<32> { return L1_getFinalizedStateRoot(disclose(batchIndex_)); }
-// export circuit getL1WithdrawRoot(batchIndex_: Uint<64>): Bytes<32> { return L1_getWithdrawRoot(disclose(batchIndex_)); }
-
-// export circuit getMessageRollingHash(index_: Uint<64>): Bytes<32> { return L1_getMessageRollingHash(disclose(index_)); }
-// export circuit getMessageTimestamp(index_: Uint<64>): Uint<64> { return L1_getMessageTimestamp(disclose(index_)); }
-// export circuit getNextCrossDomainMessageIndex(): Uint<64> { return L1_getNextCrossDomainMessageIndex(); }
-// export circuit getNextUnfinalizedQueueIndex(): Uint<64> { return L1_getNextUnfinalizedQueueIndex(); }
-
-// export circuit getL1ToL2Deposit(queueIndex_: Uint<64>): PT_L1ToL2DepositMessage {
-//   return L1_getL1ToL2Deposit(disclose(queueIndex_));
-// }
-
-// export circuit getLockedNIGHT(): Uint<128> { return L1_getLockedNIGHT(); }
-// export circuit getFeeVault(): Uint<128> { return L1_getFeeVault(); }
-
-// export circuit getPendingWithdrawal(recipient_: Bytes<32>): Uint<128> {
-//   return L1_getPendingWithdrawal(disclose(recipient_));
-// }
-
 // Pool helpers (needed to pick a coin id off-chain)
 // NOTE: Shielded flow disabled for unshielded-only pipeline.
 // export circuit hasLiquidityCoin(id_: Uint<64>): Boolean { return L1_hasLiquidityCoin(disclose(id_)); }

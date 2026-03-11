@@ -94,8 +94,26 @@ fn point_to_tuple(p: &EmbeddedGroupAffine) -> (Fr, Fr) {
     (x, y)
 }
 
+/// Derive verifier public keys (x, y) as 32-byte LE arrays from secret keys.
+/// Each secret key is reduced mod the Jubjub scalar field, then multiplied by the generator.
+pub fn derive_verifier_public_keys(secret_keys: &[BigUint]) -> Vec<([u8; 32], [u8; 32])> {
+    let q = BigUint::parse_bytes(JUBJUB_SCALAR_FIELD_DECIMAL.as_bytes(), 10)
+        .expect("JUBJUB_SCALAR_FIELD_DECIMAL valid");
+    let g = EmbeddedGroupAffine::generator();
+    secret_keys
+        .iter()
+        .map(|sk_big| {
+            let sk_fr = biguint_to_fr_reduced(sk_big, &q)
+                .expect("secret key must be representable as Fr");
+            let pk = g * sk_fr;
+            let (x, y) = point_to_tuple(&pk);
+            (fr_to_bytes32(&x), fr_to_bytes32(&y))
+        })
+        .collect()
+}
+
 /// Fr to decimal string for JSON (matches TS bigint.toString()).
-fn fr_to_decimal(f: &Fr) -> String {
+pub fn fr_to_decimal(f: &Fr) -> String {
     let le = f.as_le_bytes();
     BigUint::from_bytes_le(&le).to_string()
 }

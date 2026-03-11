@@ -1,3 +1,6 @@
 [submodule "compact"]
 	path = compact
 	url = https://github.com/LFDT-Minokawa/compact.git
+[submodule "midnight-node"]
+	path = midnight-node
+	url = git@github.com:midnightntwrk/midnight-node.git

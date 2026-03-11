@@ -86,9 +86,10 @@ module L1Rollup {
   export ledger sequencers: Set<Bytes<32>>;
   export ledger finalizers: Set<Bytes<32>>; // empty => permissionless finalizeBatch
 
-  // Rollup core maps
-  export ledger committedBatches: Map<Uint<64>, Bytes<32>>;
-  export ledger finalizedStateRoots: Map<Uint<64>, Bytes<32>>;
+  // Rollup core (scalars for continuity; withdrawRoots keyed by batch index for claims)
+  export ledger lastCommittedBatchHash: Bytes<32>;
+  export ledger lastFinalizedStateRoot: Bytes<32>;
+  export ledger lastFinalizedBatchHash: Bytes<32>;
   export ledger withdrawRoots: Map<Uint<64>, Bytes<32>>;
   export ledger miscData: RollupMiscData;
 
@@ -652,14 +653,12 @@ module L1Rollup {
     const parentBatchHash = disclose(parentBatchHash_);
     const batchHash = disclose(batchHash_);
 
-    const lastCommitted = miscData.lastCommittedBatchIndex;
-    assert(committedBatches.member(lastCommitted), "MISSING_PARENT_COMMIT");
+    assert(miscData.lastCommittedBatchIndex == miscData.lastFinalizedBatchIndex, "COMMIT_OUT_OF_ORDER");
+    assert(parentBatchHash == lastFinalizedBatchHash, "BAD_PARENT_BATCH_HASH");
 
-    const expectedParent = committedBatches.lookup(lastCommitted);
-    assert(parentBatchHash == expectedParent, "BAD_PARENT_BATCH_HASH");
+    const newIndex = ((miscData.lastFinalizedBatchIndex + (1 as Uint<64>)) as Uint<64>);
 
-    const newIndex = ((lastCommitted + (1 as Uint<64>)) as Uint<64>);
-    committedBatches.insert(newIndex, batchHash);
+    lastCommittedBatchHash = batchHash;
 
     miscData = RollupMiscData {
       lastCommittedBatchIndex: newIndex,
@@ -712,23 +711,12 @@ module L1Rollup {
 
     // 2) Batch monotonicity
     const expected = ((miscData.lastFinalizedBatchIndex + (1 as Uint<64>)) as Uint<64>);
-    //assert(bpd.batchIndex == expected, "WRONG_BATCH_INDEX");
+    assert(bpd.batchIndex == expected, "WRONG_BATCH_INDEX");
 
-    // 3) Continuity
-    // TODO: We're removing two least important asserts to decrease the circuit cost ever so
-    // slightly. Otherwise txns calling it fail a cost check. Double check the security of this.
-    //assert(finalizedStateRoots.member(miscData.lastFinalizedBatchIndex), "MISSING_PREV_STATE");
-    //assert(committedBatches.member(miscData.lastFinalizedBatchIndex), "MISSING_PREV_COMMIT");
-
-    const prevState = finalizedStateRoots.lookup(miscData.lastFinalizedBatchIndex);
-    const prevBatch = committedBatches.lookup(miscData.lastFinalizedBatchIndex);
-
-    //assert(bpd.prevStateRoot == prevState, "BAD_PREV_STATE_ROOT");
-    //assert(bpd.prevBatchHash == prevBatch, "BAD_PREV_BATCH_HASH");
-
-    // 4) Batch committed
-    //assert(committedBatches.member(bpd.batchIndex), "BATCH_NOT_COMMITTED");
-    //assert(committedBatches.lookup(bpd.batchIndex) == bpd.batchHash, "BATCH_HASH_MISMATCH");
+    // 3) Continuity (scalars)
+    assert(bpd.prevStateRoot == lastFinalizedStateRoot, "BAD_PREV_STATE_ROOT");
+    assert(bpd.prevBatchHash == lastFinalizedBatchHash, "BAD_PREV_BATCH_HASH");
+    assert(bpd.batchHash == lastCommittedBatchHash, "BATCH_HASH_MISMATCH");
 
     // 5) Message queue progress
     //assert(bpd.lastProcessedQueueIndex < nextCrossDomainMessageIndex, "BAD_LAST_PROCESSED_INDEX");
@@ -743,7 +731,8 @@ module L1Rollup {
     verifyThresholdSignatures(digest, signatures_, signerBitmap);
 
     // 7) Store results
-    finalizedStateRoots.insert(bpd.batchIndex, bpd.postStateRoot);
+    lastFinalizedStateRoot = bpd.postStateRoot;
+    lastFinalizedBatchHash = bpd.batchHash;
     withdrawRoots.insert(bpd.batchIndex, bpd.withdrawRoot);
 
     miscData = RollupMiscData {
@@ -779,16 +768,6 @@ module L1Rollup {
 
   circuit isBatchFinalized(batchIndex: Uint<64>): Boolean {
     return batchIndex <= miscData.lastFinalizedBatchIndex;
-  }
-
-  circuit getCommittedBatch(batchIndex_: Uint<64>): Bytes<32> {
-    const i = disclose(batchIndex_);
-    return committedBatches.member(i) ? committedBatches.lookup(i) : zero32();
-  }
-
-  circuit getFinalizedStateRoot(batchIndex_: Uint<64>): Bytes<32> {
-    const i = disclose(batchIndex_);
-    return finalizedStateRoots.member(i) ? finalizedStateRoots.lookup(i) : zero32();
   }
 
   circuit getWithdrawRoot(batchIndex_: Uint<64>): Bytes<32> {
@@ -845,8 +824,11 @@ module L1Rollup {
     if (f != zero32()) { finalizers.insert(f); }
 
     // Genesis at index 0
-    committedBatches.insert(0 as Uint<64>, disclose(genesisBatchHash_));
-    finalizedStateRoots.insert(0 as Uint<64>, disclose(genesisStateRoot_));
+    const gHash = disclose(genesisBatchHash_);
+    const gRoot = disclose(genesisStateRoot_);
+    lastCommittedBatchHash = gHash;
+    lastFinalizedStateRoot = gRoot;
+    lastFinalizedBatchHash = gHash;
     withdrawRoots.insert(0 as Uint<64>, emptyWithdrawRoot16());
 
     miscData = RollupMiscData {
