@@ -48,7 +48,43 @@ async function main(): Promise<void> {
       'Deploy the Bridge contract. Network via -n/--network (or MIDNIGHT_NETWORK). Wallet: --deployer-seed <hex> or FUNDING_SEED / MY_PREVIEW_MNEMONIC.',
     )
     .option('--deployer-seed <hex>', 'Deployer wallet hex seed (32 bytes, 64 hex chars). Overrides env.')
-    .action(async (subOpts: { deployerSeed?: string }) => {
+    .option('--owner <hex>', 'Constructor owner Bytes<32> (64 hex chars). Default: deployer coin public key')
+    .option('--layer2-chain-id <n>', 'Constructor layer2ChainId Uint<64> (decimal). Default: 0')
+    .option('--rollup-id <hex>', 'Constructor rollupId Bytes<32> (64 hex chars). Default: 0x00..00')
+    .option(
+      '--genesis-state-root <hex>',
+      'Constructor genesisStateRoot Bytes<32> (64 hex chars). Default: 0x00..00',
+    )
+    .option(
+      '--genesis-batch-hash <hex>',
+      'Constructor genesisBatchHash Bytes<32> (64 hex chars). Default: 0x00..00',
+    )
+    .option(
+      '--verifier-set <json>',
+      'Constructor verifierSet as JSON array of exactly 3 points: [{"x":"...","y":"..."}, ...]',
+    )
+    .option('--signature-threshold <n>', 'Constructor signatureThreshold Uint<8> (decimal). Default: 1')
+    .option(
+      '--initial-sequencer <hex>',
+      'Constructor initialSequencer Bytes<32> (64 hex chars). Default: deployer coin public key',
+    )
+    .option(
+      '--initial-finalizer <hex>',
+      'Constructor initialFinalizer Bytes<32> (64 hex chars). Default: 0x00..00',
+    )
+    .action(
+      async (subOpts: {
+        deployerSeed?: string;
+        owner?: string;
+        layer2ChainId?: string;
+        rollupId?: string;
+        genesisStateRoot?: string;
+        genesisBatchHash?: string;
+        verifierSet?: string;
+        signatureThreshold?: string;
+        initialSequencer?: string;
+        initialFinalizer?: string;
+      }) => {
       const opts = program.opts();
       const deployConfig = resolveDeployConfig({
         indexer: opts.indexer,
@@ -59,6 +95,15 @@ async function main(): Promise<void> {
       });
       await runDeploy(deployConfig, {
         deployerSeed: subOpts.deployerSeed,
+        owner: subOpts.owner,
+        layer2ChainId: subOpts.layer2ChainId,
+        rollupId: subOpts.rollupId,
+        genesisStateRoot: subOpts.genesisStateRoot,
+        genesisBatchHash: subOpts.genesisBatchHash,
+        verifierSet: subOpts.verifierSet,
+        signatureThreshold: subOpts.signatureThreshold,
+        initialSequencer: subOpts.initialSequencer,
+        initialFinalizer: subOpts.initialFinalizer,
         json: opts.json,
       });
     });

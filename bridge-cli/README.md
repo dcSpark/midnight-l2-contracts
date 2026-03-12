@@ -1,6 +1,6 @@
 # bridge-cli
 
-Non-interactive CLI for the **Midnight Bridge contract**. All inputs are via CLI flags and environment variables. It is used by the rollup node (Rust) as a subprocess to build and submit Bridge transactions, and by users for actions like claiming withdrawals.
+Non-interactive CLI for the **Midnight Bridge contract**. All inputs are via CLI flags and environment variables. The **Rust rollup node** integrates only with the **executor service** (HTTP API); it does not spawn the CLI. The standalone CLI is for operators and one-off commands (deploy, state, deposit, claim withdrawal, etc.).
 
 ---
 
@@ -16,12 +16,7 @@ The rollup node must interact with Midnight in two ways:
 1. **Reading Bridge state** (e.g. to see user deposits) – already done in pure Rust in the rollup repo.
 2. **Sending transactions** – calling Bridge circuits to commit/finalize batches, change authorities, withdraw fees, etc. Building and proving these calls depends on Bridge compilation artifacts (JS/TS), so they cannot be fully implemented in Rust.
 
-**bridge-cli** is the TypeScript layer that:
-
-- Builds and proves Bridge contract calls (commit batch, finalize batch, set verifier set, claim withdrawal, etc.).
-- Can be invoked from the Rust rollup node as a **subprocess**: the node passes arguments and env, bridge-cli runs without stdin and exits with 0 on success.
-
-So: **Rust owns orchestration and ledger logic; bridge-cli owns transaction construction and submission (or output of signed tx hex for Rust to submit).**
+**bridge-cli** is the TypeScript layer that builds and proves Bridge contract calls (commit batch, finalize batch, set verifier set, claim withdrawal, etc.). The rollup node does **not** spawn the TS CLI. It calls the **executor service** over HTTP: a long-lived process that builds the wallet once, joins the contract, and exposes commit-batch, finalize-batch, set-verifier-set, and other operations as REST endpoints. The **standalone CLI** (`npm run cli -- …`) is for humans and scripts (deploy, state, deposit, one-off finalize, etc.); the **executor** is what the rollup node uses.
 
 ---
 
@@ -47,23 +42,18 @@ npx tsx src/cli.ts <command> [options]
 
 Use `.env` or pass flags; see Environment variables and Examples below.
 
-### Rust ↔ TS boundary
+### Rust ↔ executor boundary
 
-- **commit-batch**: Rust computes `parent_hash` and `batch_hash` (e.g. from its ledger), then runs bridge-cli with `--parent-hash` and `--batch-hash`. No ledger read inside the CLI for this command.
-- **finalize-batch**: Contract signature is `finalizeBatch(batchPublicData_, signatures_, signerBitmap_, finalizeTimestamp_)`. The CLI accepts these **four arguments** (first two as JSON strings). Rust can compute them (ledger + batch data + signatures) and pass them in; or use the TS blueprint in `finalize-batch-from-ledger` (single wallet session: ensure pending batch, build batch data, sign, submit).
-- **Subprocess**: From the rollup repo, see `bridge-cli/decoder-rs` (in this repo), which invokes the TS CLI for commit/finalize with the right argv and env. Use the same pattern from the actual rollup node.
+The rollup node (or any client) calls the executor HTTP API only. Example flows:
+
+- **commit-batch**: Rust computes `parent_hash` and `batch_hash` (e.g. from its ledger), then sends `POST /commit-batch` with body `{ "parentHash", "batchHash" }`.
+- **finalize-batch**: Contract signature is `finalizeBatch(batchPublicData_, signatures_, signerBitmap_, finalizeTimestamp_)`. Rust sends `POST /finalize-batch` with the same four inputs (batchPublicData, signatures, signerBitmap, finalizeTimestamp). Alternatively, the TS blueprint in `finalize-batch-from-ledger` (single wallet session: ensure pending batch, build batch data, sign, submit) can be used via `POST /finalize-batch-from-ledger`.
 
 ### Testing and scripts
 
 - **`npm run cli -- state`** – No wallet; good smoke test for config and indexer.
 - **`src/test-decode.ts`** – Dev script: runs `state`, then (if not skipped) `finalize-batch-from-ledger` on undeployed network. Uses same command logic as the CLI.
-- **`bridge-cli/decoder-rs`** – Rust CLI that calls the TS bridge-cli for commit/finalize; useful to test the Rust→TS flow and JSON serialization of batch/signatures.
-
-### Design notes
-
-- **Non-interactive**: No readline; everything via argv and env so it’s scriptable and subprocess-friendly.
-- **Explicit args**: Commands that map to contract calls (e.g. `finalize-batch`) take the same arguments as the contract; construction from ledger is in separate commands or helpers (e.g. `finalize-batch-from-ledger`, `getFinalizeBatchArgsFromLedger`).
-- **Interactive TUI** – For deploy/join and exploratory use, `npm run tui-undeployed` / `tui-preview`; entrypoint is `cli-interactive.ts`.
+- **`bridge-cli/decoder-rs`** – Rust CLI that calls the executor HTTP endpoints for commit/finalize; useful to test the Rust→executor flow and JSON serialization of batch/signatures.
 
 ---
 
@@ -193,25 +183,52 @@ All request/response bodies are JSON. On error the response has status 4xx/5xx a
 | POST | `/deposit` | Body: `{ "amount" }`; optional `l2Recipient`, `gasLimit`, `timestamp`. |
 | POST | `/relay-withdraw-night-with-proof` | Body: `l2Sender`, `recipient`, `amount`, `batchIndex`, `nonce`, `indexBits`, `siblings`. |
 | POST | `/test-withdraw` | Body: optional same options as CLI (e.g. `depositAmount`, `skipSetVerifierSet`, `waitAttempts`, `waitDelayMs`). |
-| POST | `/deploy` | Body: optional `{ "deployerSeed" }`. Deploys a new contract; service stays joined to the address it was started with. |
+| POST | `/deploy` | Body: optional `{ "deployerSeed" }` and any constructor overrides (`owner`, `layer2ChainId`, `rollupId`, `genesisStateRoot`, `genesisBatchHash`, `verifierSet`, `signatureThreshold`, `initialSequencer`, `initialFinalizer`). Deploys a new contract; service stays joined to the address it was started with. |
 | POST | `/build-signatures` | Body: `{ "batchPublicData" }` (object or JSON string), optional `signatureNonce` (base nonce, number or string). Returns `{ "signatures": "<JSON string>" }` for use in finalize-batch. |
 
 Success responses return the same shape as the CLI JSON output (e.g. `{ "txHash", "status" }`).
 
 ---
 
-## Calling from Rust (subprocess)
+## Deploying the Bridge contract
 
-Invoke the CLI with no stdin; pass all config via argv and env:
+Deploy with the CLI or via the executor's `POST /deploy` endpoint. Wallet is taken from `--deployer-seed` or env (`FUNDING_SEED` / `MY_PREVIEW_MNEMONIC`).
+
+**CLI:** From the `bridge-cli` directory (or project root with `npm run cli`):
 
 ```bash
-node path/to/bridge-cli/dist/cli.js commit-batch --contract <addr>
-# or: npx tsx path/to/bridge-cli/src/cli.ts commit-batch --contract <addr>
+npm run cli -- deploy -n undeployed
+# or preview: npm run cli -- deploy -n preview
+# Optional: --deployer-seed <64_hex> --json
 ```
 
-Set `BRIDGE_CONTRACT_ADDRESS`, `INDEXER_HTTP`, `FUNDING_SEED`, etc. in the environment of the spawned process. Exit code 0 on success; non-zero and stderr on failure.
+All Bridge constructor arguments are **optional**. If omitted, defaults are used. You can override any subset via CLI flags or, for `POST /deploy`, via the request body.
 
-**Alternative: executor service.** Instead of spawning the CLI per command, start the executor service once (`npm run executor` in bridge-cli) and point the Rust CLI at it with `EXECUTOR_URL` or `--executor-url` (see decoder-rs README). The Rust CLI then calls the HTTP endpoints and avoids repeated wallet sync.
+| Argument | CLI flag | Default |
+|----------|----------|---------|
+| owner | `--owner <64 hex>` | Deployer coin public key |
+| layer2ChainId | `--layer2-chain-id <n>` | 0 |
+| rollupId | `--rollup-id <64 hex>` | 32 zero bytes |
+| genesisStateRoot | `--genesis-state-root <64 hex>` | 32 zero bytes |
+| genesisBatchHash | `--genesis-batch-hash <64 hex>` | 32 zero bytes |
+| verifierSet | `--verifier-set <json>` | Default 3 points from default keys |
+| signatureThreshold | `--signature-threshold <n>` | 1 |
+| initialSequencer | `--initial-sequencer <64 hex>` | Deployer coin public key |
+| initialFinalizer | `--initial-finalizer <64 hex>` | 32 zero bytes |
+
+**Example** – deploy with only genesis state root overridden:
+
+```bash
+npm run cli -- deploy -n undeployed --genesis-state-root 6c0ab7442e390ff41c99a7b864bae8a72869490f73a0ada97006877d01a9fa0b
+```
+
+**Executor:** `POST /deploy` accepts the same optional fields in the JSON body: `owner`, `layer2ChainId`, `rollupId`, `genesisStateRoot`, `genesisBatchHash`, `verifierSet`, `signatureThreshold`, `initialSequencer`, `initialFinalizer`. Bytes&lt;32&gt; as 64-char hex; verifierSet as array of 3 points `[{ "x", "y" }, ...]`.
+
+---
+
+## Calling from Rust
+
+The rollup node (or any client) should use the **executor service** only. Start it once with `npm run executor` in `bridge-cli`, set `EXECUTOR_URL` (or equivalent) in the rollup config, and call the documented POST endpoints (`/commit-batch`, `/finalize-batch`, `/set-verifier-set`, etc.). No subprocess invocation. The one-shot CLI (`npm run cli -- <command>`) remains available for manual or script use.
 
 ## Interactive TUI
 

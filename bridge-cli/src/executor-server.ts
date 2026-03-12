@@ -59,17 +59,12 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
       }
       try {
         resolve(JSON.parse(body));
-      } catch (e) {
+      } catch {
         reject(new Error('Invalid JSON body'));
       }
     });
     req.on('error', reject);
   });
-}
-
-function parseQuery(url: string): URLSearchParams {
-  const i = url.indexOf('?');
-  return new URLSearchParams(i >= 0 ? url.slice(i) : '');
 }
 
 export async function createExecutorServer(ctx: {
@@ -302,6 +297,15 @@ export async function createExecutorServer(ctx: {
             deployConfig,
             {
               deployerSeed: body.deployerSeed as string | undefined,
+              owner: body.owner as string | Uint8Array | undefined,
+              layer2ChainId: body.layer2ChainId as string | number | bigint | undefined,
+              rollupId: body.rollupId as string | Uint8Array | undefined,
+              genesisStateRoot: body.genesisStateRoot as string | Uint8Array | undefined,
+              genesisBatchHash: body.genesisBatchHash as string | Uint8Array | undefined,
+              verifierSet: body.verifierSet as string | unknown,
+              signatureThreshold: body.signatureThreshold as string | number | bigint | undefined,
+              initialSequencer: body.initialSequencer as string | Uint8Array | undefined,
+              initialFinalizer: body.initialFinalizer as string | Uint8Array | undefined,
               json: true,
             },
             executorContext,
@@ -400,7 +404,12 @@ async function main(): Promise<void> {
   });
 }
 
-main().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exitCode = 1;
-});
+const isExecutorEntry =
+  typeof process.argv[1] === 'string' &&
+  (process.argv[1].endsWith('executor-server.js') || process.argv[1].endsWith('executor-server.ts'));
+if (isExecutorEntry) {
+  void main().catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exitCode = 1;
+  });
+}

@@ -192,7 +192,6 @@ export interface WalletContext {
 }
 
 const defaultPrivateState: BridgePrivateState = { privateState: 0 };
-const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n];
 const DEFAULT_SIGNATURE_THRESHOLD = 1n;
 const DEFAULT_LAYER2_CHAIN_ID = 0n;
 const ZERO_BYTES_32 = new Uint8Array(32);
@@ -208,6 +207,18 @@ type BridgeConstructorArgs = [
   Uint8Array,
   Uint8Array,
 ];
+
+export type BridgeConstructorArgOverrides = {
+  owner?: Uint8Array;
+  layer2ChainId?: bigint;
+  rollupId?: Uint8Array;
+  genesisStateRoot?: Uint8Array;
+  genesisBatchHash?: Uint8Array;
+  verifierSet?: { x: bigint; y: bigint }[];
+  signatureThreshold?: bigint;
+  initialSequencer?: Uint8Array;
+  initialFinalizer?: Uint8Array;
+};
 
 const toHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
 
@@ -225,6 +236,31 @@ const createDefaultConstructorArgs = (ownerBytes: Uint8Array): BridgeConstructor
     ZERO_BYTES_32,
   ];
 };
+
+const applyBridgeConstructorArgOverrides = (
+  defaultArgs: BridgeConstructorArgs,
+  overrides?: BridgeConstructorArgOverrides,
+): BridgeConstructorArgs => {
+  if (!overrides) {
+    return defaultArgs;
+  }
+  return [
+    overrides.owner ?? defaultArgs[0],
+    overrides.layer2ChainId ?? defaultArgs[1],
+    overrides.rollupId ?? defaultArgs[2],
+    overrides.genesisStateRoot ?? defaultArgs[3],
+    overrides.genesisBatchHash ?? defaultArgs[4],
+    overrides.verifierSet ?? defaultArgs[5],
+    overrides.signatureThreshold ?? defaultArgs[6],
+    overrides.initialSequencer ?? defaultArgs[7],
+    overrides.initialFinalizer ?? defaultArgs[8],
+  ];
+};
+
+export const resolveBridgeConstructorArgs = (
+  providers: BridgeProviders,
+  overrides?: BridgeConstructorArgOverrides,
+): BridgeConstructorArgs => applyBridgeConstructorArgOverrides(createDefaultConstructorArgs(getOwnerBytes(providers)), overrides);
 
 /**
  * Sign all unshielded offers in a transaction's intents, using the correct
@@ -414,7 +450,7 @@ export const deploy = async (
   privateState: BridgePrivateState,
   args?: BridgeConstructorArgs,
 ): Promise<DeployedBridgeContract> => {
-  const constructorArgs = args ?? createDefaultConstructorArgs(getOwnerBytes(providers));
+  const constructorArgs = args ?? resolveBridgeConstructorArgs(providers);
   if (!providers.walletProvider) {
     throw new Error('Wallet provider is not available');
   }
