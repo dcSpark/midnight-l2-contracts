@@ -147,6 +147,7 @@ struct RollupHead {
     signature_threshold: u8,
     sequencers: BTreeSet<[u8; 32]>,
     finalizers: BTreeSet<[u8; 32]>,
+    initialized: bool,
     last_committed_batch_hash: [u8; 32],
     last_finalized_state_root: [u8; 32],
     last_finalized_batch_hash: [u8; 32],
@@ -170,16 +171,37 @@ struct RollupTail {
 pub fn decode_bridge_ledger(state: &ContractState<DefaultDB>) -> Result<BridgeLedger> {
     let root = state.data.get_ref();
     let root_parts = expect_array(root).context("bridge state root must be an array")?;
-    if root_parts.len() != 3 {
+    if root_parts.len() != 2 {
         return Err(anyhow!(
-            "expected 3 top-level state segments, found {}",
+            "expected 2 top-level state segments, found {}",
             root_parts.len()
         ));
     }
+    let first = expect_array(root_parts[0].deref())
+        .context("first top-level segment must be an array")?;
+    let second = expect_array(root_parts[1].deref())
+        .context("second top-level segment must be an array")?;
+    if first.len() != 8 || second.len() != 15 {
+        return Err(anyhow!(
+            "expected flattened L1 layout with [8, 15] entries, found [{}, {}]",
+            first.len(),
+            second.len()
+        ));
+    }
 
-    let rollup_head = decode_rollup_head(root_parts[0].deref())?;
-    let (rollup_tail, l2_gateway, l2_messenger, l2_message_queue) =
-        decode_rollup_tail_and_modules(root_parts[1].deref(), root_parts[2].deref())?;
+    let (rollup_head, rollup_tail) = decode_rollup_flattened_l1_only(first, second)?;
+    let l2_gateway = L2GatewayLedger {
+        balances: BTreeMap::new(),
+    };
+    let l2_messenger = L2MessengerLedger {
+        last_processed_l1_index: 0,
+        x_domain_message_sender: [0u8; 32],
+    };
+    let l2_message_queue = L2MessageQueueLedger {
+        message_count: 0,
+        withdraw_root: [0u8; 32],
+        branches: vec![[0u8; 32]; 16],
+    };
 
     let rollup = RollupLedger {
         owner: rollup_head.owner,
@@ -189,6 +211,7 @@ pub fn decode_bridge_ledger(state: &ContractState<DefaultDB>) -> Result<BridgeLe
         signature_threshold: rollup_head.signature_threshold,
         sequencers: rollup_head.sequencers,
         finalizers: rollup_head.finalizers,
+        initialized: rollup_head.initialized,
         last_committed_batch_hash: rollup_head.last_committed_batch_hash,
         last_finalized_state_root: rollup_head.last_finalized_state_root,
         last_finalized_batch_hash: rollup_head.last_finalized_batch_hash,
@@ -214,53 +237,73 @@ pub fn decode_bridge_ledger(state: &ContractState<DefaultDB>) -> Result<BridgeLe
     })
 }
 
-fn decode_rollup_head(value: &StateValue) -> Result<RollupHead> {
-    let items = expect_array(value).context("rollup header must be an array")?;
-    if items.len() != 13 {
-        return Err(anyhow!(
-            "rollup header expected 13 entries, found {}",
-            items.len()
-        ));
-    }
-    let mut iter = items.into_iter();
-
-    let owner = decode_bytes32_value(iter_next(&mut iter, "owner")?.deref(), "owner")?;
+fn decode_rollup_flattened_l1_only(
+    head_prefix: Vec<Sp<StateValue>>,
+    suffix: Vec<Sp<StateValue>>,
+) -> Result<(RollupHead, RollupTail)> {
+    let mut h = head_prefix.into_iter();
+    let owner = decode_bytes32_value(iter_next(&mut h, "owner")?.deref(), "owner")?;
     let layer2_chain_id =
-        decode_u64_value(iter_next(&mut iter, "layer2ChainId")?.deref(), "layer2ChainId")?;
-    let rollup_id = decode_bytes32_value(iter_next(&mut iter, "rollupId")?.deref(), "rollupId")?;
+        decode_u64_value(iter_next(&mut h, "layer2ChainId")?.deref(), "layer2ChainId")?;
+    let rollup_id = decode_bytes32_value(iter_next(&mut h, "rollupId")?.deref(), "rollupId")?;
     let verifier_set =
-        decode_curve_point_vector(iter_next(&mut iter, "verifierSet")?.deref(), "verifierSet")?;
+        decode_curve_point_vector(iter_next(&mut h, "verifierSet")?.deref(), "verifierSet")?;
     let signature_threshold = decode_u8_value(
-        iter_next(&mut iter, "signatureThreshold")?.deref(),
+        iter_next(&mut h, "signatureThreshold")?.deref(),
         "signatureThreshold",
     )?;
-    let sequencers = decode_bytes32_set(iter_next(&mut iter, "sequencers")?.deref(), "sequencers")?;
-    let finalizers = decode_bytes32_set(iter_next(&mut iter, "finalizers")?.deref(), "finalizers")?;
+    let sequencers = decode_bytes32_set(iter_next(&mut h, "sequencers")?.deref(), "sequencers")?;
+    let finalizers = decode_bytes32_set(iter_next(&mut h, "finalizers")?.deref(), "finalizers")?;
+    let initialized = decode_bool_value(iter_next(&mut h, "initialized")?.deref(), "initialized")?;
+
+    let mut s = suffix.into_iter();
     let last_committed_batch_hash = decode_bytes32_value(
-        iter_next(&mut iter, "lastCommittedBatchHash")?.deref(),
+        iter_next(&mut s, "lastCommittedBatchHash")?.deref(),
         "lastCommittedBatchHash",
     )?;
     let last_finalized_state_root = decode_bytes32_value(
-        iter_next(&mut iter, "lastFinalizedStateRoot")?.deref(),
+        iter_next(&mut s, "lastFinalizedStateRoot")?.deref(),
         "lastFinalizedStateRoot",
     )?;
     let last_finalized_batch_hash = decode_bytes32_value(
-        iter_next(&mut iter, "lastFinalizedBatchHash")?.deref(),
+        iter_next(&mut s, "lastFinalizedBatchHash")?.deref(),
         "lastFinalizedBatchHash",
     )?;
     let withdraw_roots =
-        decode_u64_bytes32_map(iter_next(&mut iter, "withdrawRoots")?.deref(), "withdrawRoots")?;
-    let misc_data = decode_misc_data(iter_next(&mut iter, "miscData")?.deref(), "miscData")?;
+        decode_u64_bytes32_map(iter_next(&mut s, "withdrawRoots")?.deref(), "withdrawRoots")?;
+    let misc_data = decode_misc_data(iter_next(&mut s, "miscData")?.deref(), "miscData")?;
     let first_cross_domain_message_index = decode_u64_value(
-        iter_next(&mut iter, "firstCrossDomainMessageIndex")?.deref(),
+        iter_next(&mut s, "firstCrossDomainMessageIndex")?.deref(),
         "firstCrossDomainMessageIndex",
     )?;
+    let next_cross_domain_message_index = decode_u64_value(
+        iter_next(&mut s, "nextCrossDomainMessageIndex")?.deref(),
+        "nextCrossDomainMessageIndex",
+    )?;
+    let next_unfinalized_queue_index = decode_u64_value(
+        iter_next(&mut s, "nextUnfinalizedQueueIndex")?.deref(),
+        "nextUnfinalizedQueueIndex",
+    )?;
+    let message_rolling_hashes = decode_u64_bytes32_map(
+        iter_next(&mut s, "messageRollingHashes")?.deref(),
+        "messageRollingHashes",
+    )?;
+    let message_timestamps =
+        decode_u64_u64_map(iter_next(&mut s, "messageTimestamps")?.deref(), "messageTimestamps")?;
+    let l1_to_l2_deposits =
+        decode_deposit_map(iter_next(&mut s, "l1ToL2Deposits")?.deref(), "l1ToL2Deposits")?;
+    let executed_l2_to_l1_messages = decode_bytes32_set(
+        iter_next(&mut s, "executedL2ToL1Messages")?.deref(),
+        "executedL2ToL1Messages",
+    )?;
+    let locked_night = decode_u128_value(iter_next(&mut s, "lockedNIGHT")?.deref(), "lockedNIGHT")?;
+    let fee_vault = decode_u128_value(iter_next(&mut s, "feeVault")?.deref(), "feeVault")?;
+    let pending_withdrawals = decode_bytes32_u128_map(
+        iter_next(&mut s, "pendingWithdrawals")?.deref(),
+        "pendingWithdrawals",
+    )?;
 
-    if iter.next().is_some() {
-        return Err(anyhow!("unexpected extra entries in rollup header"));
-    }
-
-    Ok(RollupHead {
+    let head = RollupHead {
         owner,
         layer2_chain_id,
         rollup_id,
@@ -268,76 +311,15 @@ fn decode_rollup_head(value: &StateValue) -> Result<RollupHead> {
         signature_threshold,
         sequencers,
         finalizers,
+        initialized,
         last_committed_batch_hash,
         last_finalized_state_root,
         last_finalized_batch_hash,
         withdraw_roots,
         misc_data,
         first_cross_domain_message_index,
-    })
-}
-
-fn decode_rollup_tail_and_modules(
-    value: &StateValue,
-    branch_nodes: &StateValue,
-) -> Result<(RollupTail, L2GatewayLedger, L2MessengerLedger, L2MessageQueueLedger)> {
-    let items = expect_array(value).context("rollup tail must be an array")?;
-    if items.len() != 15 {
-        return Err(anyhow!(
-            "rollup tail expected 15 entries, found {}",
-            items.len()
-        ));
-    }
-    let mut iter = items.into_iter();
-
-    let next_cross_domain_message_index = decode_u64_value(
-        iter_next(&mut iter, "nextCrossDomainMessageIndex")?.deref(),
-        "nextCrossDomainMessageIndex",
-    )?;
-    let next_unfinalized_queue_index = decode_u64_value(
-        iter_next(&mut iter, "nextUnfinalizedQueueIndex")?.deref(),
-        "nextUnfinalizedQueueIndex",
-    )?;
-    let message_rolling_hashes = decode_u64_bytes32_map(
-        iter_next(&mut iter, "messageRollingHashes")?.deref(),
-        "messageRollingHashes",
-    )?;
-    let message_timestamps =
-        decode_u64_u64_map(iter_next(&mut iter, "messageTimestamps")?.deref(), "messageTimestamps")?;
-    let l1_to_l2_deposits =
-        decode_deposit_map(iter_next(&mut iter, "l1ToL2Deposits")?.deref(), "l1ToL2Deposits")?;
-    let executed_l2_to_l1_messages = decode_bytes32_set(
-        iter_next(&mut iter, "executedL2ToL1Messages")?.deref(),
-        "executedL2ToL1Messages",
-    )?;
-    let locked_night = decode_u128_value(iter_next(&mut iter, "lockedNIGHT")?.deref(), "lockedNIGHT")?;
-    let fee_vault = decode_u128_value(iter_next(&mut iter, "feeVault")?.deref(), "feeVault")?;
-    let pending_withdrawals = decode_bytes32_u128_map(
-        iter_next(&mut iter, "pendingWithdrawals")?.deref(),
-        "pendingWithdrawals",
-    )?;
-    let l2_balances =
-        decode_bytes32_u128_map(iter_next(&mut iter, "l2GatewayBalances")?.deref(), "l2GatewayBalances")?;
-    let last_processed_l1_index = decode_u64_value(
-        iter_next(&mut iter, "lastProcessedL1Index")?.deref(),
-        "lastProcessedL1Index",
-    )?;
-    let x_domain_message_sender = decode_bytes32_value(
-        iter_next(&mut iter, "xDomainMessageSender")?.deref(),
-        "xDomainMessageSender",
-    )?;
-    let message_count = decode_u64_value(iter_next(&mut iter, "messageCount")?.deref(), "messageCount")?;
-    let withdraw_root =
-        decode_bytes32_value(iter_next(&mut iter, "withdrawRoot")?.deref(), "withdrawRoot")?;
-    let branch0 = decode_bytes32_value(iter_next(&mut iter, "branch0")?.deref(), "branch0")?;
-
-    if iter.next().is_some() {
-        return Err(anyhow!("unexpected extra entries in rollup tail"));
-    }
-
-    let branches = decode_branch_nodes(branch_nodes, branch0)?;
-
-    let rollup_tail = RollupTail {
+    };
+    let tail = RollupTail {
         next_cross_domain_message_index,
         next_unfinalized_queue_index,
         message_rolling_hashes,
@@ -348,36 +330,7 @@ fn decode_rollup_tail_and_modules(
         fee_vault,
         pending_withdrawals,
     };
-
-    let l2_gateway = L2GatewayLedger { balances: l2_balances };
-    let l2_messenger = L2MessengerLedger {
-        last_processed_l1_index,
-        x_domain_message_sender,
-    };
-    let l2_message_queue = L2MessageQueueLedger {
-        message_count,
-        withdraw_root,
-        branches,
-    };
-
-    Ok((rollup_tail, l2_gateway, l2_messenger, l2_message_queue))
-}
-
-fn decode_branch_nodes(value: &StateValue, branch0: [u8; 32]) -> Result<Vec<[u8; 32]>> {
-    let entries = expect_array(value).context("message queue branches must be an array")?;
-    if entries.len() != 15 {
-        return Err(anyhow!(
-            "expected 15 additional branch nodes, found {}",
-            entries.len()
-        ));
-    }
-    let mut branches = Vec::with_capacity(16);
-    branches.push(branch0);
-    for (idx, entry) in entries.into_iter().enumerate() {
-        let node = decode_bytes32_value(entry.deref(), &format!("branch{}", idx + 1))?;
-        branches.push(node);
-    }
-    Ok(branches)
+    Ok((head, tail))
 }
 
 fn decode_deposit_map(value: &StateValue, label: &str) -> Result<BTreeMap<u64, Deposit>> {
@@ -542,6 +495,15 @@ fn decode_u8_value(value: &StateValue, label: &str) -> Result<u8> {
         return Err(anyhow!("{} exceeded u8 range", label));
     }
     Ok(raw as u8)
+}
+
+fn decode_bool_value(value: &StateValue, label: &str) -> Result<bool> {
+    let raw = decode_u64_value(value, label)?;
+    match raw {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(anyhow!("{} exceeded boolean range", label)),
+    }
 }
 
 fn decode_u128_value(value: &StateValue, label: &str) -> Result<u128> {

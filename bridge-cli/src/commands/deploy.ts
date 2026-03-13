@@ -18,21 +18,21 @@ export interface DeployOptions {
   deployerSeed?: string;
   /** Optional constructor owner Bytes<32>. */
   owner?: string | Uint8Array;
-  /** Optional constructor layer2ChainId Uint<64>. */
+  /** Optional initialize layer2ChainId Uint<64>. */
   layer2ChainId?: string | number | bigint;
-  /** Optional constructor rollupId Bytes<32>. */
+  /** Optional initialize rollupId Bytes<32>. */
   rollupId?: string | Uint8Array;
-  /** Optional constructor genesisStateRoot Bytes<32>. */
+  /** Optional initialize genesisStateRoot Bytes<32>. */
   genesisStateRoot?: string | Uint8Array;
-  /** Optional constructor genesisBatchHash Bytes<32>. */
+  /** Optional initialize genesisBatchHash Bytes<32>. */
   genesisBatchHash?: string | Uint8Array;
-  /** Optional constructor verifierSet Vector<3, NativePoint> as JSON or object. */
+  /** Optional initialize verifierSet Vector<3, NativePoint> as JSON or object. */
   verifierSet?: string | unknown;
-  /** Optional constructor signatureThreshold Uint<8>. */
+  /** Optional initialize signatureThreshold Uint<8>. */
   signatureThreshold?: string | number | bigint;
-  /** Optional constructor initialSequencer Bytes<32>. */
+  /** Optional initialize initialSequencer Bytes<32>. */
   initialSequencer?: string | Uint8Array;
-  /** Optional constructor initialFinalizer Bytes<32>. */
+  /** Optional initialize initialFinalizer Bytes<32>. */
   initialFinalizer?: string | Uint8Array;
   /** Machine-readable output. */
   json?: boolean;
@@ -41,6 +41,7 @@ export interface DeployOptions {
 export interface DeployResult {
   contractAddress: string;
   networkLabel: string;
+  initializeTxHash?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -183,15 +184,24 @@ export async function runDeploy(
   try {
     const constructorOverrides = resolveConstructorOverrides(opts);
     const constructorArgs = api.resolveBridgeConstructorArgs(providers, constructorOverrides);
+    const initializeArgs = api.resolveBridgeInitializeArgs(providers, constructorOverrides);
     const deployed = await api.deploy(providers, { privateState: 0 }, constructorArgs);
+    const initializeTx = await ((deployed.callTx as unknown) as { initialize: (...args: unknown[]) => Promise<{ public: { txHash: string } }> }).initialize(
+      ...initializeArgs,
+    );
     const address = deployed.deployTxData.public.contractAddress;
-    const result: DeployResult = { contractAddress: address, networkLabel };
+    const result: DeployResult = {
+      contractAddress: address,
+      networkLabel,
+      initializeTxHash: initializeTx.public.txHash,
+    };
     if (!executorContext) {
       if (opts.json) {
         console.log(JSON.stringify(result));
       } else {
         process.stdout.write(`BRIDGE_ADDRESS=${address}\n`);
         process.stdout.write(`VITE_CONTRACT_ADDRESS="${address}"\n`);
+        process.stdout.write(`BRIDGE_INITIALIZE_TX_HASH=${initializeTx.public.txHash}\n`);
       }
     }
     return result;

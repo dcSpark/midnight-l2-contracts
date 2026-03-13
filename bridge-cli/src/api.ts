@@ -198,6 +198,9 @@ const ZERO_BYTES_32 = new Uint8Array(32);
 
 type BridgeConstructorArgs = [
   Uint8Array,
+];
+
+type BridgeInitializeArgs = [
   bigint,
   Uint8Array,
   Uint8Array,
@@ -223,9 +226,12 @@ export type BridgeConstructorArgOverrides = {
 const toHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
 
 const createDefaultConstructorArgs = (ownerBytes: Uint8Array): BridgeConstructorArgs => {
+  return [ownerBytes];
+};
+
+const createDefaultInitializeArgs = (ownerBytes: Uint8Array): BridgeInitializeArgs => {
   const verifierSet = deriveDefaultVerifierSet();
   return [
-    ownerBytes,
     DEFAULT_LAYER2_CHAIN_ID,
     ZERO_BYTES_32,
     ZERO_BYTES_32,
@@ -238,29 +244,34 @@ const createDefaultConstructorArgs = (ownerBytes: Uint8Array): BridgeConstructor
 };
 
 const applyBridgeConstructorArgOverrides = (
-  defaultArgs: BridgeConstructorArgs,
+  defaultArgs: BridgeInitializeArgs,
   overrides?: BridgeConstructorArgOverrides,
-): BridgeConstructorArgs => {
+): BridgeInitializeArgs => {
   if (!overrides) {
     return defaultArgs;
   }
   return [
-    overrides.owner ?? defaultArgs[0],
-    overrides.layer2ChainId ?? defaultArgs[1],
-    overrides.rollupId ?? defaultArgs[2],
-    overrides.genesisStateRoot ?? defaultArgs[3],
-    overrides.genesisBatchHash ?? defaultArgs[4],
-    overrides.verifierSet ?? defaultArgs[5],
-    overrides.signatureThreshold ?? defaultArgs[6],
-    overrides.initialSequencer ?? defaultArgs[7],
-    overrides.initialFinalizer ?? defaultArgs[8],
+    overrides.layer2ChainId ?? defaultArgs[0],
+    overrides.rollupId ?? defaultArgs[1],
+    overrides.genesisStateRoot ?? defaultArgs[2],
+    overrides.genesisBatchHash ?? defaultArgs[3],
+    overrides.verifierSet ?? defaultArgs[4],
+    overrides.signatureThreshold ?? defaultArgs[5],
+    overrides.initialSequencer ?? defaultArgs[6],
+    overrides.initialFinalizer ?? defaultArgs[7],
   ];
 };
 
 export const resolveBridgeConstructorArgs = (
   providers: BridgeProviders,
   overrides?: BridgeConstructorArgOverrides,
-): BridgeConstructorArgs => applyBridgeConstructorArgOverrides(createDefaultConstructorArgs(getOwnerBytes(providers)), overrides);
+): BridgeConstructorArgs => [overrides?.owner ?? getOwnerBytes(providers)];
+
+export const resolveBridgeInitializeArgs = (
+  providers: BridgeProviders,
+  overrides?: BridgeConstructorArgOverrides,
+): BridgeInitializeArgs =>
+  applyBridgeConstructorArgOverrides(createDefaultInitializeArgs(getOwnerBytes(providers)), overrides);
 
 /**
  * Sign all unshielded offers in a transaction's intents, using the correct
@@ -474,12 +485,12 @@ export const deploy = async (
     signingKey,
   };
   const coinPublicKey = parseCoinPublicKeyToHex(providers.walletProvider.getCoinPublicKey(), getNetworkId());
-  const unprovenDeployTxData = await createUnprovenDeployTxFromVerifierKeys(
+  const unprovenDeployTxData = (await createUnprovenDeployTxFromVerifierKeys(
     providers.zkConfigProvider,
     coinPublicKey,
-    deployOptions,
+    deployOptions as never,
     providers.walletProvider.getEncryptionPublicKey(),
-  );
+  )) as any;
   const finalizedTxData = await submitTx(providers, {
     unprovenTx: unprovenDeployTxData.private.unprovenTx,
   });
@@ -506,7 +517,7 @@ export const deploy = async (
     callTx: createCircuitCallTxInterface(providers, bridgeCompiledContract, contractAddress, BridgePrivateStateId),
     circuitMaintenanceTx: createCircuitMaintenanceTxInterfaces(providers, bridgeCompiledContract, contractAddress),
     contractMaintenanceTx: createContractMaintenanceTxInterface(providers, bridgeCompiledContract, contractAddress),
-  };
+  } as DeployedBridgeContract;
 };
 
 export const displayBridgeState = async (

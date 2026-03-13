@@ -55,7 +55,7 @@ describe('executor /deploy route', () => {
     vi.clearAllMocks();
   });
 
-  it('forwards constructor override payload to runDeploy', async () => {
+  it('forwards deploy/initialize override payload to runDeploy', async () => {
     const logger = {
       info: vi.fn(),
       error: vi.fn(),

@@ -39,6 +39,9 @@ const ZERO_BYTES_32 = new Uint8Array(32);
 
 type BridgeConstructorArgs = [
   Uint8Array,
+];
+
+type BridgeInitializeArgs = [
   bigint,
   Uint8Array,
   Uint8Array,
@@ -52,11 +55,16 @@ type BridgeConstructorArgs = [
 const createDefaultConstructorArgs = (
   ownerBytes: Uint8Array
 ): BridgeConstructorArgs => {
+  return [ownerBytes];
+};
+
+const createDefaultInitializeArgs = (
+  ownerBytes: Uint8Array
+): BridgeInitializeArgs => {
   const verifierSet = DEFAULT_VERIFIER_SECRET_KEYS.map((sk) =>
     Bridge.pureCircuits.derivePk(sk)
   );
   return [
-    ownerBytes,
     DEFAULT_LAYER2_CHAIN_ID,
     ZERO_BYTES_32,
     ZERO_BYTES_32,
@@ -329,6 +337,11 @@ export class ContractController implements ContractControllerInterface {
       ),
       args: createDefaultConstructorArgs(ownerBytes),
     });
+    await (
+      (deployedContract.callTx as unknown) as {
+        initialize: (...args: unknown[]) => Promise<unknown>;
+      }
+    ).initialize(...createDefaultInitializeArgs(ownerBytes));
 
     logger.trace({
       contractDeployed: {

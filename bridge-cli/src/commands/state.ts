@@ -32,6 +32,7 @@ function formatDeposit(deposit: L1ToL2DepositMessage) {
 export interface StateResult {
   contractAddress: string;
   network: string;
+  initialized: boolean;
   nextCrossDomainMessageIndex: string;
   lastCommittedBatchIndex: string;
   lastCommittedBatchHash: string | null;
@@ -55,6 +56,7 @@ export async function runState(
   }
 
   const ledger = Bridge.ledger(contractState.data);
+  const initialized = (ledger as { L1_initialized?: boolean }).L1_initialized ?? false;
   const lastFinalizedBatchIndex = ledger.L1_miscData.lastFinalizedBatchIndex;
   const lastCommittedBatchIndex = ledger.L1_miscData.lastCommittedBatchIndex;
   const nextIndex = ledger.L1_nextCrossDomainMessageIndex;
@@ -80,6 +82,7 @@ export async function runState(
   const result: StateResult = {
     contractAddress,
     network: networkLabel,
+    initialized,
     nextCrossDomainMessageIndex: nextIndex.toString(),
     lastCommittedBatchIndex: lastCommittedBatchIndex.toString(),
     lastCommittedBatchHash: lastCommittedBatchHash ? toHex(lastCommittedBatchHash) : null,
@@ -103,6 +106,7 @@ export async function runState(
   console.log('Contract address:', contractAddress);
   console.log('Network:', networkLabel);
   console.log('Indexer:', config.indexer);
+  console.log('Initialized:', initialized ? 'yes' : 'no');
   console.log('Next cross-domain message index:', nextIndex.toString());
   if (rollingHashAtNextIndex) {
     console.log('Rolling hash at latest index:', toHex(rollingHashAtNextIndex));

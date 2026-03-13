@@ -75,16 +75,17 @@ module L1Rollup {
 
   // Immutable config
   export sealed ledger owner: Bytes<32>;
-  export sealed ledger layer2ChainId: Uint<64>;
-  export sealed ledger rollupId: Bytes<32>;
+  export ledger layer2ChainId: Uint<64>;
+  export ledger rollupId: Bytes<32>;
 
   // Verifier set (oracle committee) + threshold
   export ledger verifierSet: Vector<3, NativePoint>;
-  export sealed ledger signatureThreshold: Uint<8>;
+  export ledger signatureThreshold: Uint<8>;
 
   // Access control
   export ledger sequencers: Set<Bytes<32>>;
   export ledger finalizers: Set<Bytes<32>>; // empty => permissionless finalizeBatch
+  export ledger initialized: Boolean;
 
   // Rollup core (scalars for continuity; withdrawRoots keyed by batch index for claims)
   export ledger lastCommittedBatchHash: Bytes<32>;
@@ -802,7 +803,6 @@ module L1Rollup {
   // ============================================================================
 
   export circuit initialize(
-    owner_: Bytes<32>,
     layer2ChainId_: Uint<64>,
     rollupId_: Bytes<32>,
     genesisStateRoot_: Bytes<32>,
@@ -812,7 +812,10 @@ module L1Rollup {
     initialSequencer_: Bytes<32>,
     initialFinalizer_: Bytes<32>
   ): [] {
-    owner = disclose(owner_);
+    onlyOwner();
+    assert(!initialized, "ALREADY_INITIALIZED");
+    initialized = true;
+
     layer2ChainId = disclose(layer2ChainId_);
     rollupId = disclose(rollupId_);
 

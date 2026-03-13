@@ -815,6 +815,7 @@ fn build_unified_state_config(
         num_executed_messages: num_entries,
         num_pending_withdrawals: std::cmp::max(num_entries, 1),
         owner: *coin_public_bytes,
+        initialized: true,
         locked_night: 10u128.pow(18),
         fee_vault: 10u128.pow(18),
         last_finalized_batch_hash: FINALIZE_PREV_BATCH_HASH,

@@ -21,7 +21,7 @@ describe('resolveConstructorOverrides', () => {
     expect(overrides?.signatureThreshold).toBe(2n);
   });
 
-  it('parses all constructor overrides including verifier set JSON', () => {
+  it('parses all deploy/initialize overrides including verifier set JSON', () => {
     const overrides = resolveConstructorOverrides({
       owner: bytes('11'),
       layer2ChainId: 5n,

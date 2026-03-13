@@ -183,7 +183,7 @@ All request/response bodies are JSON. On error the response has status 4xx/5xx a
 | POST | `/deposit` | Body: `{ "amount" }`; optional `l2Recipient`, `gasLimit`, `timestamp`. |
 | POST | `/relay-withdraw-night-with-proof` | Body: `l2Sender`, `recipient`, `amount`, `batchIndex`, `nonce`, `indexBits`, `siblings`. |
 | POST | `/test-withdraw` | Body: optional same options as CLI (e.g. `depositAmount`, `skipSetVerifierSet`, `waitAttempts`, `waitDelayMs`). |
-| POST | `/deploy` | Body: optional `{ "deployerSeed" }` and any constructor overrides (`owner`, `layer2ChainId`, `rollupId`, `genesisStateRoot`, `genesisBatchHash`, `verifierSet`, `signatureThreshold`, `initialSequencer`, `initialFinalizer`). Deploys a new contract; service stays joined to the address it was started with. |
+| POST | `/deploy` | Body: optional `{ "deployerSeed" }` and deploy/init overrides (`owner`, `layer2ChainId`, `rollupId`, `genesisStateRoot`, `genesisBatchHash`, `verifierSet`, `signatureThreshold`, `initialSequencer`, `initialFinalizer`). Internally this runs deploy, then `initialize` in a second tx. |
 | POST | `/build-signatures` | Body: `{ "batchPublicData" }` (object or JSON string), optional `signatureNonce` (base nonce, number or string). Returns `{ "signatures": "<JSON string>" }` for use in finalize-batch. |
 
 Success responses return the same shape as the CLI JSON output (e.g. `{ "txHash", "status" }`).
@@ -192,7 +192,7 @@ Success responses return the same shape as the CLI JSON output (e.g. `{ "txHash"
 
 ## Deploying the Bridge contract
 
-Deploy with the CLI or via the executor's `POST /deploy` endpoint. Wallet is taken from `--deployer-seed` or env (`FUNDING_SEED` / `MY_PREVIEW_MNEMONIC`).
+Deploy with the CLI or via the executor's `POST /deploy` endpoint. Wallet is taken from `--deployer-seed` or env (`FUNDING_SEED` / `MY_PREVIEW_MNEMONIC`). The deploy flow is two-step: deploy with owner-only constructor, then call `initialize` in a second transaction.
 
 **CLI:** From the `bridge-cli` directory (or project root with `npm run cli`):
 
@@ -202,7 +202,7 @@ npm run cli -- deploy -n undeployed
 # Optional: --deployer-seed <64_hex> --json
 ```
 
-All Bridge constructor arguments are **optional**. If omitted, defaults are used. You can override any subset via CLI flags or, for `POST /deploy`, via the request body.
+All deploy/init arguments are **optional**. If omitted, defaults are used. `owner` is used in the constructor; the remaining values are passed to `initialize` after deploy. You can override any subset via CLI flags or, for `POST /deploy`, via the request body.
 
 | Argument | CLI flag | Default |
 |----------|----------|---------|
@@ -222,7 +222,7 @@ All Bridge constructor arguments are **optional**. If omitted, defaults are used
 npm run cli -- deploy -n undeployed --genesis-state-root 6c0ab7442e390ff41c99a7b864bae8a72869490f73a0ada97006877d01a9fa0b
 ```
 
-**Executor:** `POST /deploy` accepts the same optional fields in the JSON body: `owner`, `layer2ChainId`, `rollupId`, `genesisStateRoot`, `genesisBatchHash`, `verifierSet`, `signatureThreshold`, `initialSequencer`, `initialFinalizer`. Bytes&lt;32&gt; as 64-char hex; verifierSet as array of 3 points `[{ "x", "y" }, ...]`.
+**Executor:** `POST /deploy` accepts the same optional fields in the JSON body: `owner`, `layer2ChainId`, `rollupId`, `genesisStateRoot`, `genesisBatchHash`, `verifierSet`, `signatureThreshold`, `initialSequencer`, `initialFinalizer`. Bytes&lt;32&gt; as 64-char hex; verifierSet as array of 3 points `[{ "x", "y" }, ...]`. The endpoint executes deploy + initialize before returning success.
 
 ---
 
