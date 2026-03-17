@@ -21,6 +21,7 @@ pub struct RollupLedger {
     pub signature_threshold: u8,
     pub sequencers: BTreeSet<[u8; 32]>,
     pub finalizers: BTreeSet<[u8; 32]>,
+    pub initialized: bool,
     pub last_committed_batch_hash: [u8; 32],
     pub last_finalized_state_root: [u8; 32],
     pub last_finalized_batch_hash: [u8; 32],

@@ -23,6 +23,7 @@ pub struct BridgeStateConfig {
     pub num_executed_messages: u64,
     pub num_pending_withdrawals: u64,
     pub owner: [u8; 32],
+    pub initialized: bool,
     pub locked_night: u128,
     pub fee_vault: u128,
     pub last_finalized_batch_hash: [u8; 32],
@@ -57,6 +58,7 @@ impl Default for BridgeStateConfig {
             num_executed_messages: 0,
             num_pending_withdrawals: 0,
             owner: [0u8; 32],
+            initialized: false,
             locked_night: 0,
             fee_vault: 0,
             last_finalized_batch_hash: [0u8; 32],
@@ -80,17 +82,15 @@ impl Default for BridgeStateConfig {
 /// `decode_bridge_ledger` in `commands/decode.rs`:
 ///
 /// ```text
-/// root = Array[3]
-///   [0] = rollup_head  (Array[13])
-///   [1] = rollup_tail  (Array[15])
-///   [2] = branch_nodes (Array[15])
+/// root = Array[2]
+///   [0] = rollup_head_prefix (Array[8])
+///   [1] = rollup_suffix      (Array[15])
 /// ```
 pub fn build_bridge_state(config: &BridgeStateConfig) -> ContractState<DefaultDB> {
-    let head = build_rollup_head(config);
-    let tail = build_rollup_tail(config);
-    let branches = build_branch_nodes();
+    let head_prefix = build_rollup_head_prefix(config);
+    let suffix = build_rollup_suffix(config);
 
-    let root = make_array(vec![head, tail, branches]);
+    let root = make_array(vec![head_prefix, suffix]);
 
     ContractState::new(
         root,
@@ -253,15 +253,6 @@ fn build_pending_withdrawals(count: u64) -> SV {
     StateValue::Map(map)
 }
 
-/// Build the l2GatewayBalances map from explicit (pubkey, balance) pairs.
-fn build_l2_gateway_balances(balances: &[([u8; 32], u128)]) -> SV {
-    let mut map: HashMap<AlignedValue, SV, DefaultDB> = HashMap::new();
-    for (key, amount) in balances {
-        map = map.insert(AlignedValue::from(*key), make_cell_u128(*amount));
-    }
-    StateValue::Map(map)
-}
-
 /// Build the operations map with entry points for all Bridge impure circuits.
 /// Each operation has `None` as verifier key (sufficient for intent generation).
 fn build_bridge_operations() -> HashMap<EntryPointBuf, ContractOperation, DefaultDB> {
@@ -279,6 +270,7 @@ fn build_bridge_operations() -> HashMap<EntryPointBuf, ContractOperation, Defaul
         "addFinalizer",
         "removeFinalizer",
         "setVerifierSet",
+        "initialize",
     ];
     let mut ops: HashMap<EntryPointBuf, ContractOperation, DefaultDB> = HashMap::new();
     for name in circuit_names {
@@ -290,58 +282,46 @@ fn build_bridge_operations() -> HashMap<EntryPointBuf, ContractOperation, Defaul
     ops
 }
 
-/// Rollup head: Array[13] matching `decode_rollup_head` field order.
-fn build_rollup_head(config: &BridgeStateConfig) -> SV {
-    let last_finalized = 0u64;
-    let last_committed = config.last_committed_batch_index.unwrap_or(last_finalized);
-
+/// Rollup head prefix: Array[8] matching current flattened on-chain layout.
+fn build_rollup_head_prefix(config: &BridgeStateConfig) -> SV {
     make_array(vec![
-        make_cell_bytes32(config.owner),                                                    // owner
-        make_cell_u64(0),                                                                   // layer2ChainId
-        make_cell_bytes32([0u8; 32]),                                                       // rollupId
-        make_verifier_set_cell(&config.verifier_set),                                       // verifierSet
-        make_cell_u8(config.signature_threshold),                                           // signatureThreshold
-        build_bytes32_set(config.num_sequencers, 0x01, &config.extra_sequencers),              // sequencers
-        build_bytes32_set(config.num_finalizers, 0x02, &config.extra_finalizers),             // finalizers
-        make_cell_bytes32(config.last_committed_batch_hash),                                // lastCommittedBatchHash
-        make_cell_bytes32(config.last_finalized_state_root),                                // lastFinalizedStateRoot
-        make_cell_bytes32(config.last_finalized_batch_hash),                                // lastFinalizedBatchHash
-        build_withdraw_roots_map(config.num_withdraw_roots, &config.specific_withdraw_roots), // withdrawRoots
-        make_misc_data_cell(last_committed, last_finalized),                                // miscData
-        make_cell_u64(0),                                                                   // firstCrossDomainMessageIndex
+        make_cell_bytes32(config.owner),                                    // owner
+        make_cell_u64(0),                                                   // layer2ChainId
+        make_cell_bytes32([0u8; 32]),                                       // rollupId
+        make_verifier_set_cell(&config.verifier_set),                       // verifierSet
+        make_cell_u8(config.signature_threshold),                           // signatureThreshold
+        build_bytes32_set(config.num_sequencers, 0x01, &config.extra_sequencers), // sequencers
+        build_bytes32_set(config.num_finalizers, 0x02, &config.extra_finalizers), // finalizers
+        make_cell_u8(if config.initialized { 1 } else { 0 }),              // initialized
     ])
 }
 
-/// Rollup tail: Array[15] matching `decode_rollup_tail_and_modules` field order.
-fn build_rollup_tail(config: &BridgeStateConfig) -> SV {
+/// Rollup suffix: Array[15] matching current flattened on-chain layout.
+fn build_rollup_suffix(config: &BridgeStateConfig) -> SV {
+    let last_finalized = 0u64;
+    let last_committed = config.last_committed_batch_index.unwrap_or(last_finalized);
     let mut deposits_map: HashMap<AlignedValue, SV, DefaultDB> = HashMap::new();
     for i in 0..config.num_deposits {
         deposits_map = deposits_map.insert(AlignedValue::from(i), make_deposit_entry(i));
     }
 
     make_array(vec![
-        make_cell_u64(config.num_deposits),                              // nextCrossDomainMessageIndex
-        make_cell_u64(0),                                                // nextUnfinalizedQueueIndex
-        build_u64_bytes32_map(config.num_message_hashes),                // messageRollingHashes
-        build_u64_u64_map(config.num_message_hashes),                    // messageTimestamps
-        StateValue::Map(deposits_map),                                   // l1ToL2Deposits
-        build_bytes32_set(config.num_executed_messages, 0x03, &[]),      // executedL2ToL1Messages
-        make_cell_u128(config.locked_night),                             // lockedNIGHT
-        make_cell_u128(config.fee_vault),                                // feeVault
-        build_pending_withdrawals(config.num_pending_withdrawals),       // pendingWithdrawals
-        build_l2_gateway_balances(&config.l2_gateway_balances),          // l2GatewayBalances
-        make_cell_u64(0),                                                // lastProcessedL1Index
-        make_cell_bytes32([0u8; 32]),                                    // xDomainMessageSender
-        make_cell_u64(0),                                                // messageCount
-        make_cell_bytes32([0u8; 32]),                                    // withdrawRoot
-        make_cell_bytes32([0u8; 32]),                                    // branch0
+        make_cell_bytes32(config.last_committed_batch_hash),                          // lastCommittedBatchHash
+        make_cell_bytes32(config.last_finalized_state_root),                          // lastFinalizedStateRoot
+        make_cell_bytes32(config.last_finalized_batch_hash),                          // lastFinalizedBatchHash
+        build_withdraw_roots_map(config.num_withdraw_roots, &config.specific_withdraw_roots), // withdrawRoots
+        make_misc_data_cell(last_committed, last_finalized),                          // miscData
+        make_cell_u64(0),                                                             // firstCrossDomainMessageIndex
+        make_cell_u64(config.num_deposits),                                           // nextCrossDomainMessageIndex
+        make_cell_u64(0),                                                             // nextUnfinalizedQueueIndex
+        build_u64_bytes32_map(config.num_message_hashes),                             // messageRollingHashes
+        build_u64_u64_map(config.num_message_hashes),                                 // messageTimestamps
+        StateValue::Map(deposits_map),                                                // l1ToL2Deposits
+        build_bytes32_set(config.num_executed_messages, 0x03, &[]),                   // executedL2ToL1Messages
+        make_cell_u128(config.locked_night),                                          // lockedNIGHT
+        make_cell_u128(config.fee_vault),                                             // feeVault
+        build_pending_withdrawals(config.num_pending_withdrawals),                    // pendingWithdrawals
     ])
-}
-
-/// Branch nodes: Array[15] (branch1..branch15), all zero.
-fn build_branch_nodes() -> SV {
-    let nodes: Vec<SV> = (0..15).map(|_| make_cell_bytes32([0u8; 32])).collect();
-    make_array(nodes)
 }
 
 #[cfg(test)]
@@ -370,6 +350,7 @@ mod tests {
             num_executed_messages: 4,
             num_pending_withdrawals: 6,
             owner: [0xAA; 32],
+            initialized: true,
             locked_night: 999_999,
             fee_vault: 500_000,
             last_finalized_batch_hash: [0xBB; 32],

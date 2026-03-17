@@ -1,7 +1,8 @@
-// Bridge Contract (L1 + L2 Unified)
+// Bridge Contract (L1)
 //
 // Implements L1_CONTRACT_ARCHITECTURE.md for the L1 side.
-// L2 modules remain for local simulation (withdraw message + merkle root building).
+// L2 modules for local simulation (withdraw message + merkle root building) commented
+// out as making the contract too large.
 
 pragma language_version >= 0.20;
 
@@ -9,9 +10,9 @@ import CompactStandardLibrary;
 import Signer;
 import ProtocolTypes prefix PT_;
 import L1Rollup prefix L1_;
-import L2Gateway prefix GW_;
-import L2Messenger prefix MSG_;
-import L2MessageQueue prefix MQ_;
+//import L2Gateway prefix GW_;
+//import L2Messenger prefix MSG_;
+//import L2MessageQueue prefix MQ_;
 
 // ============================================================================
 // RE-EXPORTS (for off-chain tooling convenience)
@@ -34,22 +35,23 @@ export pure circuit u64ToBytes32LE(x: Uint<64>): Bytes<32> { return PT_u64ToByte
 export pure circuit u128ToBytes32LE(x: Uint<128>): Bytes<32> { return PT_u128ToBytes32LE(x); }
 export pure circuit hashMerkleNode(left: Bytes<32>, right: Bytes<32>): Bytes<32> { return PT_hashMerkleNode(left, right); }
 
-export pure circuit hashL2ToL1Withdraw(
-  sender: Bytes<32>,
-  recipient: Bytes<32>,
-  amount: Uint<128>,
-  nonce: Uint<64>
-): Bytes<32> {
-  return MSG_hashWithdrawMessage(sender, recipient, amount, nonce);
-}
+//export pure circuit hashL2ToL1Withdraw(
+//  sender: Bytes<32>,
+//  recipient: Bytes<32>,
+//  amount: Uint<128>,
+//  nonce: Uint<64>
+//): Bytes<32> {
+//  return MSG_hashWithdrawMessage(sender, recipient, amount, nonce);
+//}
 
-export pure circuit hashWithdrawLeaf(messageHash: Bytes<32>): Bytes<32> {
-  return MSG_hashLeaf(messageHash);
-}
+//export pure circuit hashWithdrawLeaf(messageHash: Bytes<32>): Bytes<32> {
+//  return MSG_hashLeaf(messageHash);
+//}
 
 // Ledger variables
 export {
   L1_owner,
+  L1_initialized,
   L1_layer2ChainId,
   L1_rollupId,
   L1_verifierSet,
@@ -76,8 +78,13 @@ export {
 // CONSTRUCTOR
 // ============================================================================
 
-constructor(
-  owner_: Bytes<32>,
+constructor(owner_: Bytes<32>) {
+  // Set owner during deployment so post-deploy initialize cannot be front-run.
+  L1_owner = disclose(owner_);
+}
+
+// Runs after deployment to split deployment and initialization costs.
+export circuit initialize(
   layer2ChainId_: Uint<64>,
   rollupId_: Bytes<32>,
   genesisStateRoot_: Bytes<32>,
@@ -86,9 +93,9 @@ constructor(
   signatureThreshold_: Uint<8>,
   initialSequencer_: Bytes<32>,
   initialFinalizer_: Bytes<32>
-) {
+): [] {
+  // L1_initialize performs owner and one-time initialization checks.
   L1_initialize(
-    owner_,
     layer2ChainId_,
     rollupId_,
     genesisStateRoot_,
@@ -99,47 +106,46 @@ constructor(
     initialFinalizer_
   );
 
-  // L2 simulation modules
-  GW_initialize();
-  MSG_initialize();
-  MQ_initialize();
+  //GW_initialize();
+  //MSG_initialize();
+  //MQ_initialize();
 }
 
 // ============================================================================
 // L2: WITHDRAWAL MESSAGE GENERATION (Gateway → Messenger → Queue)
 // ============================================================================
 
-export struct WithdrawNIGHTResult {
-  nonce: Uint<64>;
-  messageHash: Bytes<32>;
-  leafHash: Bytes<32>;
-}
+//export struct WithdrawNIGHTResult {
+//  nonce: Uint<64>;
+//  messageHash: Bytes<32>;
+//  leafHash: Bytes<32>;
+//}
 
-export circuit withdrawNIGHT(recipient_: Bytes<32>, amount_: Uint<128>): WithdrawNIGHTResult {
-  const recipient = disclose(recipient_);
-  const amount = disclose(amount_);
+//export circuit withdrawNIGHT(recipient_: Bytes<32>, amount_: Uint<128>): WithdrawNIGHTResult {
+//  const recipient = disclose(recipient_);
+//  const amount = disclose(amount_);
+//
+//  const senderPk = disclose(ownPublicKey());
+//  const senderBytes = senderPk.bytes;
+//
+//  GW_debit(senderPk, amount);
+//
+//  const nonce = MQ_getMessageCount();
+//
+//  const hashes = MSG_computeWithdrawHashes(senderBytes, recipient, amount, nonce);
+//
+//  const appendedIndex = MQ_appendLeaf(hashes.leafHash);
+//  assert(appendedIndex == nonce, "Queue index mismatch");
+//
+//  return WithdrawNIGHTResult {
+//    nonce: nonce,
+//    messageHash: hashes.messageHash,
+//    leafHash: hashes.leafHash
+//  };
+//}
 
-  const senderPk = disclose(ownPublicKey());
-  const senderBytes = senderPk.bytes;
-
-  GW_debit(senderPk, amount);
-
-  const nonce = MQ_getMessageCount();
-
-  const hashes = MSG_computeWithdrawHashes(senderBytes, recipient, amount, nonce);
-
-  const appendedIndex = MQ_appendLeaf(hashes.leafHash);
-  assert(appendedIndex == nonce, "Queue index mismatch");
-
-  return WithdrawNIGHTResult {
-    nonce: nonce,
-    messageHash: hashes.messageHash,
-    leafHash: hashes.leafHash
-  };
-}
-
-circuit getWithdrawRoot(): Bytes<32> { return MQ_getWithdrawRoot(); }
-circuit getWithdrawMessageCount(): Uint<64> { return MQ_getMessageCount(); }
+//circuit getWithdrawRoot(): Bytes<32> { return MQ_getWithdrawRoot(); }
+//circuit getWithdrawMessageCount(): Uint<64> { return MQ_getMessageCount(); }
 
 // ============================================================================
 // L1: DEPOSIT / WITHDRAW CLAIM / BATCH LIFECYCLE

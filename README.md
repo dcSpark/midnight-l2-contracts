@@ -105,4 +105,10 @@ git submodule update --init
    ```
 ---
 
+### Bridge contract deployment
+
+The Bridge contract is deployed with **bridge-cli** (standalone CLI or via the executor's `POST /deploy` endpoint). Quick start: from project root run `npm run setup-standalone`, then e.g. `cd bridge-cli && npm run deploy-undeployed`, or `npm run cli -- deploy -n undeployed` with env set (see `bridge-cli/.env_template`). All constructor arguments (owner, layer2ChainId, rollupId, genesis roots, verifier set, signatureThreshold, initialSequencer, initialFinalizer) are optional and can be overridden. See [bridge-cli/README.md](bridge-cli/README.md) for deploy options, constructor override flags, and executor usage.
+
+---
+
 <div align="center"><p>Built with ❤️ by <a href="https://meshjs.dev">Mesh</a> × <a href="https://eddalabs.io">Edda Labs</a></p></div>

@@ -192,13 +192,15 @@ export interface WalletContext {
 }
 
 const defaultPrivateState: BridgePrivateState = { privateState: 0 };
-const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n];
 const DEFAULT_SIGNATURE_THRESHOLD = 1n;
 const DEFAULT_LAYER2_CHAIN_ID = 0n;
 const ZERO_BYTES_32 = new Uint8Array(32);
 
 type BridgeConstructorArgs = [
   Uint8Array,
+];
+
+type BridgeInitializeArgs = [
   bigint,
   Uint8Array,
   Uint8Array,
@@ -209,12 +211,27 @@ type BridgeConstructorArgs = [
   Uint8Array,
 ];
 
+export type BridgeConstructorArgOverrides = {
+  owner?: Uint8Array;
+  layer2ChainId?: bigint;
+  rollupId?: Uint8Array;
+  genesisStateRoot?: Uint8Array;
+  genesisBatchHash?: Uint8Array;
+  verifierSet?: { x: bigint; y: bigint }[];
+  signatureThreshold?: bigint;
+  initialSequencer?: Uint8Array;
+  initialFinalizer?: Uint8Array;
+};
+
 const toHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
 
 const createDefaultConstructorArgs = (ownerBytes: Uint8Array): BridgeConstructorArgs => {
+  return [ownerBytes];
+};
+
+const createDefaultInitializeArgs = (ownerBytes: Uint8Array): BridgeInitializeArgs => {
   const verifierSet = deriveDefaultVerifierSet();
   return [
-    ownerBytes,
     DEFAULT_LAYER2_CHAIN_ID,
     ZERO_BYTES_32,
     ZERO_BYTES_32,
@@ -225,6 +242,36 @@ const createDefaultConstructorArgs = (ownerBytes: Uint8Array): BridgeConstructor
     ZERO_BYTES_32,
   ];
 };
+
+const applyBridgeConstructorArgOverrides = (
+  defaultArgs: BridgeInitializeArgs,
+  overrides?: BridgeConstructorArgOverrides,
+): BridgeInitializeArgs => {
+  if (!overrides) {
+    return defaultArgs;
+  }
+  return [
+    overrides.layer2ChainId ?? defaultArgs[0],
+    overrides.rollupId ?? defaultArgs[1],
+    overrides.genesisStateRoot ?? defaultArgs[2],
+    overrides.genesisBatchHash ?? defaultArgs[3],
+    overrides.verifierSet ?? defaultArgs[4],
+    overrides.signatureThreshold ?? defaultArgs[5],
+    overrides.initialSequencer ?? defaultArgs[6],
+    overrides.initialFinalizer ?? defaultArgs[7],
+  ];
+};
+
+export const resolveBridgeConstructorArgs = (
+  providers: BridgeProviders,
+  overrides?: BridgeConstructorArgOverrides,
+): BridgeConstructorArgs => [overrides?.owner ?? getOwnerBytes(providers)];
+
+export const resolveBridgeInitializeArgs = (
+  providers: BridgeProviders,
+  overrides?: BridgeConstructorArgOverrides,
+): BridgeInitializeArgs =>
+  applyBridgeConstructorArgOverrides(createDefaultInitializeArgs(getOwnerBytes(providers)), overrides);
 
 /**
  * Sign all unshielded offers in a transaction's intents, using the correct
@@ -414,7 +461,7 @@ export const deploy = async (
   privateState: BridgePrivateState,
   args?: BridgeConstructorArgs,
 ): Promise<DeployedBridgeContract> => {
-  const constructorArgs = args ?? createDefaultConstructorArgs(getOwnerBytes(providers));
+  const constructorArgs = args ?? resolveBridgeConstructorArgs(providers);
   if (!providers.walletProvider) {
     throw new Error('Wallet provider is not available');
   }
@@ -438,12 +485,12 @@ export const deploy = async (
     signingKey,
   };
   const coinPublicKey = parseCoinPublicKeyToHex(providers.walletProvider.getCoinPublicKey(), getNetworkId());
-  const unprovenDeployTxData = await createUnprovenDeployTxFromVerifierKeys(
+  const unprovenDeployTxData = (await createUnprovenDeployTxFromVerifierKeys(
     providers.zkConfigProvider,
     coinPublicKey,
-    deployOptions,
+    deployOptions as never,
     providers.walletProvider.getEncryptionPublicKey(),
-  );
+  )) as any;
   const finalizedTxData = await submitTx(providers, {
     unprovenTx: unprovenDeployTxData.private.unprovenTx,
   });
@@ -470,7 +517,7 @@ export const deploy = async (
     callTx: createCircuitCallTxInterface(providers, bridgeCompiledContract, contractAddress, BridgePrivateStateId),
     circuitMaintenanceTx: createCircuitMaintenanceTxInterfaces(providers, bridgeCompiledContract, contractAddress),
     contractMaintenanceTx: createContractMaintenanceTxInterface(providers, bridgeCompiledContract, contractAddress),
-  };
+  } as DeployedBridgeContract;
 };
 
 export const displayBridgeState = async (

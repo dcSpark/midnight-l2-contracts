@@ -9,18 +9,19 @@
         {
             "splitTerminals": [{
                 "name": "contract",
-                "commands": ["cd contract"]
+                "commands": ["cd bridge-contract"]
             }]
         },
         {
             "splitTerminals": [{
                 "name": "cli",
-                "commands": ["cd cli"]
+                "commands": ["cd bridge-cli"]
             }]
         },
         {
             "splitTerminals": [{
-                "name": "infra"
+                "name": "rs",
+                "commands": ["cd bridge-cli/decoder-rs"]
             }]
         }
     ]
