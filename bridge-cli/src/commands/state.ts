@@ -3,7 +3,10 @@
  */
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { Bridge } from 'bridge-contract/browser';
+import { bech32m } from 'bech32';
 import type { CliConfig } from '../cli-config.js';
+
+const SOV_HRP = 'sov';
 
 type L1ToL2DepositMessage = {
   sender: Uint8Array;
@@ -18,10 +21,18 @@ function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
 }
 
+/** Encode L2 recipient bytes (28 or 32 from contract) as sov bech32m address. */
+function recipientToBech32(bytes: Uint8Array): string {
+  const len = Math.min(bytes.length, 28);
+  const slice = bytes.subarray(0, len);
+  const words = bech32m.toWords(Array.from(slice));
+  return bech32m.encode(SOV_HRP, words);
+}
+
 function formatDeposit(deposit: L1ToL2DepositMessage) {
   return {
     sender: toHex(deposit.sender),
-    recipient: toHex(deposit.recipient),
+    recipient: recipientToBech32(deposit.recipient),
     amount: deposit.amount.toString(),
     nonce: deposit.nonce.toString(),
     gasLimit: deposit.gasLimit.toString(),

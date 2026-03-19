@@ -100,7 +100,7 @@ pub struct DepositArgs {
     #[arg(long)]
     pub amount: String,
 
-    /// Optional L2 recipient (64 hex chars). Defaults to wallet coin public key in TS CLI.
+    /// Optional L2 recipient: 64 hex chars or sov-format address (e.g. sov1...). Defaults to wallet coin public key in TS CLI.
     #[arg(long)]
     pub l2_recipient: Option<String>,
 
@@ -250,7 +250,7 @@ pub struct TestManyDepositsArgs {
     #[arg(long, default_value = "1")]
     pub amount: String,
 
-    /// Optional L2 recipient (64 hex chars). Defaults to wallet coin public key in TS CLI.
+    /// Optional L2 recipient: 64 hex chars or sov-format address (e.g. sov1...). Defaults to wallet coin public key in TS CLI.
     #[arg(long)]
     pub l2_recipient: Option<String>,
 

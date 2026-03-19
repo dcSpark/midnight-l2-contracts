@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
+use bech32::{Bech32m, Hrp};
 use hex::FromHex;
 use midnight_node_ledger_helpers::DefaultDB;
 use midnight_node_ledger_helpers::base_crypto::fab::{AlignedValue, ValueAtom};
@@ -50,9 +51,14 @@ pub fn validate_contract_address(address: &str) -> Result<()> {
     Ok(())
 }
 
+fn bytes_to_bech32_sov(bytes: &[u8]) -> Result<String, bech32::EncodeError> {
+    let hrp = Hrp::parse_unchecked("sov");
+    bech32::encode::<Bech32m>(hrp, bytes)
+}
+
 fn dump_bridge_ledger(ledger: &BridgeLedger) -> Result<()> {
     let json_value = serde_json::to_value(ledger).context("failed to serialize bridge ledger")?;
-    let normalized = convert_byte_arrays(json_value);
+    let normalized = convert_byte_arrays(json_value, None);
     let mut buffer = String::new();
     format_json_with_inline_arrays(&normalized, 0, &mut buffer)?;
     println!("Parsed ledger:\n{}", buffer);
@@ -106,7 +112,7 @@ fn write_indent(level: usize, out: &mut String) {
     }
 }
 
-fn convert_byte_arrays(value: Value) -> Value {
+fn convert_byte_arrays(value: Value, key_hint: Option<&str>) -> Value {
     match value {
         Value::Array(items) => {
             if is_byte_array(&items) {
@@ -114,14 +120,26 @@ fn convert_byte_arrays(value: Value) -> Value {
                     .into_iter()
                     .map(|item| item.as_u64().unwrap() as u8)
                     .collect();
-                Value::String(hex::encode(bytes))
+                if key_hint == Some("recipient") && bytes.len() >= 28 {
+                    match bytes_to_bech32_sov(&bytes[0..28]) {
+                        Ok(s) => Value::String(s),
+                        Err(_) => Value::String(hex::encode(bytes)),
+                    }
+                } else {
+                    Value::String(hex::encode(bytes))
+                }
             } else {
-                Value::Array(items.into_iter().map(convert_byte_arrays).collect())
+                Value::Array(
+                    items
+                        .into_iter()
+                        .map(|item| convert_byte_arrays(item, None))
+                        .collect(),
+                )
             }
         }
         Value::Object(map) => Value::Object(
             map.into_iter()
-                .map(|(key, val)| (key, convert_byte_arrays(val)))
+                .map(|(key, val)| (key.clone(), convert_byte_arrays(val, Some(&key))))
                 .collect(),
         ),
         other => other,
