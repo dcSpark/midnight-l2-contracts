@@ -65,7 +65,7 @@ Run with `npm run cli -- <command>` or `npx tsx src/cli.ts <command>`:
 |---------|-------------|
 | `deploy` | Deploy the Bridge contract. Network via `-n`/`--network` or `MIDNIGHT_NETWORK`. Wallet: `--deployer-seed <hex>` or `FUNDING_SEED` / `MY_PREVIEW_MNEMONIC`. |
 | `state` | Read and print Bridge state (ledger summary, L1→L2 deposits). No wallet required. |
-| `deposit` | Deposit unshielded NIGHT to L2 (call `depositNIGHTUnshielded`). Requires `--amount`. Optional `--l2-recipient` (64 hex), `--gas-limit`, `--timestamp`. Requires wallet. |
+| `deposit` | Deposit unshielded NIGHT to L2 (call `depositNIGHTUnshielded`). Requires `--amount`. Optional `--l2-recipient` (64 hex or sov-format e.g. sov1...), `--gas-limit`, `--timestamp`. Requires wallet. |
 | `commit-batch` | Commit a batch (rollup node). Requires `--parent-hash` and `--batch-hash`. Requires wallet. |
 | `finalize-batch` | Finalize a batch. Requires the four `finalizeBatch` arguments as CLI args (see below). |
 | `finalize-batch-from-ledger` | Build those four args from ledger (ensurePendingBatch, buildBatchPublicData, sign) and submit. Test/blueprint command. |
@@ -100,6 +100,8 @@ BRIDGE_CONTRACT_ADDRESS=<hex> npm run cli -- state
 npm run cli -- deposit --amount 1000
 # With explicit L2 recipient (64 hex) and optional gas limit / timestamp
 npm run cli -- deposit --amount 1000 --l2-recipient <64_hex> --gas-limit 100000 --timestamp 0
+# or with sov-format L2 address:
+npm run cli -- deposit --amount 1000 --l2-recipient sov1lzkjgdaz08su3yevqu6ceywufl35se9f33kztu5cu2spja5hyyf
 
 # Commit a batch (rollup node; parent and batch hash required)
 npm run cli -- commit-batch --parent-hash <64_hex> --batch-hash <64_hex>
@@ -180,7 +182,7 @@ All request/response bodies are JSON. On error the response has status 4xx/5xx a
 | POST | `/finalize-batch-from-ledger` | No body. Builds args from ledger and submits. |
 | POST | `/set-verifier-set` | No body. |
 | POST | `/claim-l1-withdrawal-unshielded` | Body: `{ "recipient", "amount" }`. |
-| POST | `/deposit` | Body: `{ "amount" }`; optional `l2Recipient`, `gasLimit`, `timestamp`. |
+| POST | `/deposit` | Body: `{ "amount" }`; optional `l2Recipient` (32-byte hex or sov-format e.g. sov1...), `gasLimit`, `timestamp`. |
 | POST | `/relay-withdraw-night-with-proof` | Body: `l2Sender`, `recipient`, `amount`, `batchIndex`, `nonce`, `indexBits`, `siblings`. |
 | POST | `/test-withdraw` | Body: optional same options as CLI (e.g. `depositAmount`, `skipSetVerifierSet`, `waitAttempts`, `waitDelayMs`). |
 | POST | `/deploy` | Body: optional `{ "deployerSeed" }` and deploy/init overrides (`owner`, `layer2ChainId`, `rollupId`, `genesisStateRoot`, `genesisBatchHash`, `verifierSet`, `signatureThreshold`, `initialSequencer`, `initialFinalizer`). Internally this runs deploy, then `initialize` in a second tx. |
