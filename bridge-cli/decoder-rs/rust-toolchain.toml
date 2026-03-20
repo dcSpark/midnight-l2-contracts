@@ -1,0 +1,3 @@
+# Override sovereign-sdk's 1.88.0 pin: transitive deps (e.g. redb) need rustc ≥ 1.89.
+[toolchain]
+channel = "1.91.0"

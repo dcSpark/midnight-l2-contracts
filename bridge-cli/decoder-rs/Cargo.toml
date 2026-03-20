@@ -33,3 +33,6 @@ midnight-storage = { git = "https://github.com/midnightntwrk/midnight-ledger", t
 base_crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
 transient_crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-transient-crypto" }
 zkir = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "zkir" }
+
+# Own workspace root so nested sovereign-sdk checkout does not absorb this crate.
+[workspace]

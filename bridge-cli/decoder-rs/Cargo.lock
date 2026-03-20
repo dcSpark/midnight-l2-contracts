@@ -998,6 +998,7 @@ name = "decoder-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bech32",
  "clap",
  "dotenvy",
  "hex",
