@@ -14,6 +14,7 @@
 // limitations under the License.
 import { WitnessContext } from "@midnight-ntwrk/compact-runtime";
 import { Ledger } from "./managed/Bridge/contract/index.js";
+import type { Ledger as L2SimulationLedger } from "./managed/L2Simulation/contract/index.js";
 
 // This is how we type an empty object.
 export type BridgePrivateState = {
@@ -96,6 +97,20 @@ export const witnesses = {
   ): [BridgePrivateState, boolean[]] {
     // Compute the 3-bit decomposition
     const bits = computeBitmapBits(bitmap);
+    return [context.privateState, bits];
+  }
+};
+
+/** L2Simulation-only witnesses (WitnessContext is keyed on L2 `Ledger`, not Bridge `Ledger`). */
+export const l2SimulationWitnesses = {
+  indexBits(
+    context: WitnessContext<L2SimulationLedger, BridgePrivateState>,
+    index: bigint
+  ): [BridgePrivateState, boolean[]] {
+    const bits: boolean[] = [];
+    for (let i = 0; i < 16; i++) {
+      bits.push((index & (1n << BigInt(i))) !== 0n);
+    }
     return [context.privateState, bits];
   }
 };

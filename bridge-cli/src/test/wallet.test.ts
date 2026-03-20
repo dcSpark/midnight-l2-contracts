@@ -7,8 +7,7 @@ import { describe, it, beforeAll, afterAll } from 'vitest';
 import 'dotenv/config';
 import * as Rx from 'rxjs';
 import { TestEnvironment } from './simulators/simulator';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
-import { ShieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { tokenValue } from './utils/utils';
 
 const runningEnvTests = process.env.RUN_ENV_TESTS === 'true';
@@ -56,41 +55,33 @@ describe('API', () => {
   it('allows to transfer shielded tokens only', async () => {
     const state = await Rx.firstValueFrom(wallet.wallet.state().pipe(Rx.filter((s) => s.isSynced)));
     const stateReceiverAddress = state.shielded.address;
-    const ledgerReceiverAddress = ShieldedAddress.codec
-      .encode(configuration.networkId, stateReceiverAddress)
-      .asString();
     // stateAddress: "coinPublicKey" & "encryptionPublicKey" - Bytes
     logger.info({
       section: 'Shielded Address',
       stateReceiverAddress,
     });
-    // "mn_shield-addr_undeployed14gxh9wmhafr0np4gqrrx6awyus52jk7huyjy78kstym5ucnxawvtvtnrpgpszud4uyd0yjrlqyp7v5xvwqljsng2g79j5w4al9c4kuqm9zs2g"
-    logger.info({
-      section: 'ledgerReceiverAddress',
-      ledgerReceiverAddress,
-    });
-
     const ttl = new Date(Date.now() + 60 * 60 * 1000);
     const transfer = await wallet.wallet.transferTransaction(
-      wallet.shieldedSecretKeys,
-      wallet.dustSecretKey,
       [
         {
           type: 'shielded',
           outputs: [
             {
               type: ledger.shieldedToken().raw,
-              receiverAddress: ledgerReceiverAddress,
+              receiverAddress: stateReceiverAddress,
               amount: tokenValue(1n),
             },
           ],
         },
       ],
-      ttl,
+      {
+        shieldedSecretKeys: wallet.shieldedSecretKeys,
+        dustSecretKey: wallet.dustSecretKey,
+      },
+      { ttl },
     );
 
-    //proof transaction
-    const finalizedTx = await wallet.wallet.finalizeTransaction(transfer);
+    const finalizedTx = await wallet.wallet.finalizeRecipe(transfer);
     const submittedTxHash = await wallet.wallet.submitTransaction(finalizedTx);
     logger.info({
       section: 'Submitted Transaction Hash',

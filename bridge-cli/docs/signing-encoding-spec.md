@@ -66,21 +66,23 @@ Same as Bridge.Signature:
 
 - `pk`: `{ x: bigint, y: bigint }`
 - `r`: `{ x: bigint, y: bigint }`
-- `s`: bigint
+- `s`: bigint — the proof-system **`Field`** value `addField(nonce, mulField(c, sk))` in `[0, maxField()]`. It often satisfies `s ≥ q` (Jubjub subgroup order `q` = `JUBJUB_SCALAR_FIELD` in `ledger-signer.ts`). **Do not** replace `s` with `s mod q` for transactions: the contract witness must carry the exact `Field` result or `finalizeBatch` fails (`BAD_SIG_*`). On the curve, `ecMulGenerator` uses the scalar `s mod q`; the ledger still stores and checks the full `Field` `s`.
 
-Field elements and points use the proof system’s scalar field (max value from `maxField()`).
+Field elements for challenges and `mulField` inputs use the proof-system scalar field (`maxField()`).
 
-## 4. Sign algorithm (Signer.compact)
+## 4. Sign algorithm (Signer.compact + JS interop)
 
-- `pk = ecMulGenerator(sk)`
-- `r = ecMulGenerator(nonce)`
-- `c = computeChallenge(r, pk, msg)` (see §1)
-- `s = nonce + c * sk` (in the scalar field)
+- `sk' = sk mod q`, `nonce' = nonce mod q` (for `ecMulGenerator` only; same curve points as reducing full field scalars)
+- `pk = ecMulGenerator(sk')`
+- `r = ecMulGenerator(nonce')`
+- `c = computeChallenge(r, pk, msg)` then canonicalize `c` in the proof-system field
+- `s = addField(nonce, mulField(c, sk))` with **canonical** `nonce` and `sk` in `[0, maxField]` (matches compiled `Signer._sign_0` — **no** extra `mod q` on `s`)
 - Return `Signature { pk, r, s }`
 
-## 5. Verify algorithm
+## 5. Verify algorithm (local / spec)
 
-- `c = computeChallenge(r, pk, msg)`
-- Check `ecMulGenerator(s) === ecAdd(r, ecMul(pk, c))`
+- `c = computeChallenge(r, pk, msg)` (canonical field)
+- For the LHS only, `s_fr = (s mod q)` in `[0, q)` so TypeScript `ecMulGenerator` accepts `EmbeddedFr`
+- Check `ecMulGenerator(s_fr)` equals `ecAdd(r, ecMul(pk, c))` (compare `x` and `y`)
 
 Point equality is done by comparing the two field elements (x, y) of the resulting points.

@@ -1,9 +1,8 @@
-import type { ImpureCircuitId } from '@midnight-ntwrk/compact-js';
 import type { DeployedContract, FoundContract } from '@midnight-ntwrk/midnight-js-contracts';
 import type { MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
 import { Bridge, type BridgePrivateState } from 'bridge-contract/browser';
 
-export type BridgeCircuits = ImpureCircuitId<Bridge.Contract<BridgePrivateState>>;
+export type BridgeCircuits = keyof Bridge.Contract<BridgePrivateState>['provableCircuits'] & string;
 
 export const BridgePrivateStateId = 'bridgePrivateState';
 

@@ -21,8 +21,8 @@
     }
   },
   "scripts": {
-    "compact:bridge": "compact compile +0.28.0 src/Bridge.compact src/managed/Bridge",
-    "compact:l2": "compact compile +0.28.0 src/L2Simulation.compact src/managed/L2Simulation",
+    "compact:bridge": "compact compile +0.30.0 src/Bridge.compact src/managed/Bridge",
+    "compact:l2": "compact compile +0.30.0 src/L2Simulation.compact src/managed/L2Simulation",
     "compact": "npm run compact:bridge && npm run compact:l2 && bash scripts/patch-index-dts.sh",
     "test": "vitest run",
     "test:compile": "npm run compact && vitest run",

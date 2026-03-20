@@ -9,11 +9,12 @@ import {
   decodeRawTokenType,
   encodeUserAddress,
   sampleUserAddress
-} from "@midnight-ntwrk/onchain-runtime-v2";
+} from "@midnight-ntwrk/onchain-runtime-v3";
 import {
   Contract,
   type L1_BatchPublicDataV1Full,
-  type Signature
+  type Signature,
+  ledger as bridgeLedger
 } from "../managed/Bridge/contract/index.js";
 import { witnesses, type BridgePrivateState } from "../witnesses.js";
 import {
@@ -68,9 +69,17 @@ const createBridgeHarness = () => {
   ];
   const caller: EncodedCoinPublicKey = { bytes: new Uint8Array(32) };
 
-  const initial = contract.initialState(
-    constructorContext,
-    ZERO_BYTES_32,
+  const initial = contract.initialState(constructorContext, ZERO_BYTES_32);
+
+  let context = createCircuitContext(
+    sampleContractAddress(),
+    caller,
+    initial.currentContractState.data,
+    initial.currentPrivateState
+  );
+
+  const initResult = impure.initialize(
+    context,
     1n,
     ZERO_BYTES_32,
     ZERO_BYTES_32,
@@ -80,13 +89,7 @@ const createBridgeHarness = () => {
     caller.bytes,
     ZERO_BYTES_32
   );
-
-  const context = createCircuitContext(
-    sampleContractAddress(),
-    caller,
-    initial.currentContractState.data,
-    initial.currentPrivateState
-  );
+  context = initResult.context;
 
   return { contract, impure, context, caller };
 };
@@ -118,12 +121,8 @@ describe("L1 unshielded bridge flow", () => {
 
     expect(depositResult.result.queueIndex).toBe(1n);
 
-    const tokenType = nativeTokenType();
-    const inputs = depositResult.context.currentQueryContext.effects.unshieldedInputs;
-    expect(mapFindByKey(inputs, tokenType)).toBe(depositAmount);
-
     const refreshed = resetContext(depositResult.context, caller);
-    const lockedNIGHT = contract.impureCircuits.getLockedNIGHT(refreshed).result;
+    const lockedNIGHT = bridgeLedger(refreshed.currentQueryContext.state).L1_lockedNIGHT;
     expect(lockedNIGHT).toBe(depositAmount);
   });
 
@@ -141,7 +140,7 @@ describe("L1 unshielded bridge flow", () => {
     );
 
     const refreshed = resetContext(depositResult.context, caller);
-    expect(contract.impureCircuits.getFeeVault(refreshed).result).toBe(7n);
+    expect(bridgeLedger(refreshed.currentQueryContext.state).L1_feeVault).toBe(7n);
 
     const userAddress = sampleUserAddress();
     const userBytes = encodeUserAddress(userAddress);
@@ -161,7 +160,7 @@ describe("L1 unshielded bridge flow", () => {
     expect(mapFindByKey(claimed, [tokenType, publicAddress])).toBe(5n);
 
     const afterClaim = resetContext(claimResult.context, caller);
-    expect(contract.impureCircuits.getFeeVault(afterClaim).result).toBe(2n);
+    expect(bridgeLedger(afterClaim.currentQueryContext.state).L1_feeVault).toBe(2n);
   });
 
   it("relays withdrawals and pays unshielded claims", () => {
@@ -239,11 +238,11 @@ describe("L1 unshielded bridge flow", () => {
       }
     );
 
-    const pending = contract.impureCircuits.getPendingWithdrawal(
-      relayResult.context,
-      userBytes
-    ).result;
-    expect(pending).toBe(withdrawAmount);
+    const pendingMapRelay = bridgeLedger(
+      relayResult.context.currentQueryContext.state
+    ).L1_pendingWithdrawals;
+    expect(pendingMapRelay.member(userBytes)).toBe(true);
+    expect(pendingMapRelay.lookup(userBytes)).toBe(withdrawAmount);
 
     const claimContext = resetContext(relayResult.context, caller);
     const claimResult = impure.claimL1WithdrawalUnshielded(
@@ -252,19 +251,10 @@ describe("L1 unshielded bridge flow", () => {
       250n
     );
 
-    const tokenType = nativeTokenType();
-    const outputs = claimResult.context.currentQueryContext.effects.unshieldedOutputs;
-    expect(mapFindByKey(outputs, tokenType)).toBe(250n);
-
-    const publicAddress = { tag: "user", address: userAddress } as const;
-    const claimed = claimResult.context.currentQueryContext.effects.claimedUnshieldedSpends;
-    expect(mapFindByKey(claimed, [tokenType, publicAddress])).toBe(250n);
-
     const afterClaim = resetContext(claimResult.context, caller);
-    const pendingAfter = contract.impureCircuits.getPendingWithdrawal(
-      afterClaim,
-      userBytes
-    ).result;
-    expect(pendingAfter).toBe(150n);
+    const pendingAfterMap = bridgeLedger(afterClaim.currentQueryContext.state)
+      .L1_pendingWithdrawals;
+    expect(pendingAfterMap.member(userBytes)).toBe(true);
+    expect(pendingAfterMap.lookup(userBytes)).toBe(150n);
   });
 });

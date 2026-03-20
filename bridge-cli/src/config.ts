@@ -14,9 +14,19 @@ const resolveBridgeZkConfigPath = (): string => {
   return path.resolve(path.dirname(bridgeModulePath), 'managed', 'Bridge');
 };
 
+const resolvePrivateStoragePassword = (): string => {
+  const fromEnv = process.env.BRIDGE_PRIVATE_STATE_STORAGE_PASSWORD;
+  if (fromEnv && fromEnv.length >= 16) {
+    return fromEnv;
+  }
+  // Local dev fallback: meets level-private-state-provider rules (length, mixed types).
+  return 'Bridge-cli!LocalStore9x';
+};
+
 export const contractConfig = {
   privateStateStoreName: 'bridge-private-state',
   zkConfigPath: resolveBridgeZkConfigPath(),
+  privateStoragePasswordProvider: resolvePrivateStoragePassword,
 };
 
 const DEFAULT_PROOF_TIMEOUT_MS = 120 * 60 * 1000;

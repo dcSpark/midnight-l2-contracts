@@ -210,7 +210,7 @@ export class TestEnvironment {
   };
 
   static getProofServerContainer = async (_env: string) =>
-    await new GenericContainer('midnightntwrk/proof-server:7.0.1')
+    await new GenericContainer('midnightntwrk/proof-server:8.0.3')
       .withExposedPorts(6300)
       .withCommand(['midnight-proof-server', '-v'])
       .withEnvironment({ RUST_BACKTRACE: 'full' })

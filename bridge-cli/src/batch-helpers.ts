@@ -80,6 +80,51 @@ export async function readCommittedBatch(
   throw new Error(`Committed batch not found for index ${index}`);
 }
 
+export function verifierPointsEqual(
+  a: { x: bigint; y: bigint },
+  b: { x: bigint; y: bigint },
+): boolean {
+  return a.x === b.x && a.y === b.y;
+}
+
+/**
+ * Poll until `L1_verifierSet` matches `expected` (e.g. after setVerifierSet).
+ * Signing uses {@link getVerifierSecretKeysFromEnvOrDefault}; on-chain set must match.
+ */
+export async function waitForVerifierSetOnChain(
+  publicDataProvider: PublicDataProvider,
+  contractAddress: string,
+  expected: { x: bigint; y: bigint }[],
+  options?: { attempts?: number; delayMs?: number },
+): Promise<void> {
+  const attempts = options?.attempts ?? 30;
+  const delayMs = options?.delayMs ?? 2_000;
+  if (expected.length !== 3) {
+    throw new Error('waitForVerifierSetOnChain: expected exactly 3 verifier points');
+  }
+  const [e0, e1, e2] = expected;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const contractState = await publicDataProvider.queryContractState(contractAddress);
+    if (contractState) {
+      const ledger = Bridge.ledger(contractState.data);
+      const vs = ledger.L1_verifierSet;
+      if (
+        vs.length === 3 &&
+        verifierPointsEqual(vs[0]!, e0!) &&
+        verifierPointsEqual(vs[1]!, e1!) &&
+        verifierPointsEqual(vs[2]!, e2!)
+      ) {
+        return;
+      }
+    }
+    await delay(delayMs);
+  }
+  throw new Error(
+    'Timed out waiting for on-chain verifier set to match signing keys. ' +
+      'Use the same VERIFIER_SECRET_KEYS (or defaults) for setVerifierSet and finalizeBatch signing.',
+  );
+}
+
 export async function waitForBatchIndexUpdate(
   publicDataProvider: PublicDataProvider,
   _contract: Bridge.Contract<BridgePrivateState>,

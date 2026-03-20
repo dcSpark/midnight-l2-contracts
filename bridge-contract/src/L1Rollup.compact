@@ -13,7 +13,7 @@
 // - Remove l1DepositCounter: key liquidity/fee coins by queueIndex (stable unique ID).
 // - Keep code lean: avoid new counters, reuse queueIndex as the only ID.
 
-pragma language_version >= 0.20;
+pragma language_version >= 0.22;
 
 module L1Rollup {
 
@@ -79,7 +79,7 @@ module L1Rollup {
   export ledger rollupId: Bytes<32>;
 
   // Verifier set (oracle committee) + threshold
-  export ledger verifierSet: Vector<3, NativePoint>;
+  export ledger verifierSet: Vector<3, JubjubPoint>;
   export ledger signatureThreshold: Uint<8>;
 
   // Access control
@@ -758,7 +758,7 @@ module L1Rollup {
   export circuit addFinalizer(f_: Bytes<32>): [] { onlyOwner(); finalizers.insert(disclose(f_)); }
   export circuit removeFinalizer(f_: Bytes<32>): [] { onlyOwner(); finalizers.remove(disclose(f_)); }
 
-  export circuit setVerifierSet(newSet_: Vector<3, NativePoint>): [] { onlyOwner(); verifierSet = disclose(newSet_); }
+  export circuit setVerifierSet(newSet_: Vector<3, JubjubPoint>): [] { onlyOwner(); verifierSet = disclose(newSet_); }
 
   // ============================================================================
   // VIEWS / GETTERS
@@ -807,7 +807,7 @@ module L1Rollup {
     rollupId_: Bytes<32>,
     genesisStateRoot_: Bytes<32>,
     genesisBatchHash_: Bytes<32>,
-    initialVerifierSet_: Vector<3, NativePoint>,
+    initialVerifierSet_: Vector<3, JubjubPoint>,
     signatureThreshold_: Uint<8>,
     initialSequencer_: Bytes<32>,
     initialFinalizer_: Bytes<32>
