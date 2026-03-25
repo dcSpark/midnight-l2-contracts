@@ -38,7 +38,7 @@ services:
       node:
         condition: service_started
   node:
-    image: 'midnightntwrk/midnight-node:0.22.1'
+    image: 'midnightntwrk/midnight-node:0.22.2'
     container_name: 'bridge-node'
     ports:
       - '9944:9944'
