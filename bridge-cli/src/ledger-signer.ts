@@ -86,7 +86,7 @@ export function signBytes32(
   const pk = ecMulGenerator(modJubjubScalar(skF));
   const r = ecMulGenerator(modJubjubScalar(nonceF));
   const c = computeChallenge(r, pk, msg);
-  const s = addField(nonceF, mulField(canonField(c), skF));
+  const s = (nonceF + canonField(c) * skF) % JUBJUB_SCALAR_FIELD;
   return { pk, r, s };
 }
 

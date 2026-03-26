@@ -21,11 +21,12 @@ import type { BridgeProviders } from '../common-types.js';
 import type { ExecutorContext } from '../executor-context.js';
 import {
   buildBatchPublicData,
-  buildSignatureVector,
+  buildSignatureVectorViaContractArtifact,
   DEFAULT_SIGNER_BITMAP,
   ensurePendingBatch,
   getVerifierSetFromEnvOrDefault,
   hashBatchPublicDataV1Full,
+  warnIfBatchDigestArtifactMismatch,
   waitForBatchIndexUpdate,
   waitForVerifierSetOnChain,
 } from '../batch-helpers.js';
@@ -328,7 +329,8 @@ export async function runTestWithdraw(
       withdrawRoot,
     });
     const digest = hashBatchPublicDataV1Full(batchData);
-    const signatures = buildSignatureVector(digest);
+    warnIfBatchDigestArtifactMismatch(batchData, digest);
+    const signatures = buildSignatureVectorViaContractArtifact(digest);
     logProgress('Sending finalizeBatch transaction...');
     const finalizeTx = await bridgeContract.callTx.finalizeBatch(
       batchData,
