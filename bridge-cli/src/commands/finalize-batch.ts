@@ -9,6 +9,7 @@ import {
   buildSignatureVector,
   ensurePendingBatch,
   hashBatchPublicDataV1Full,
+  warnIfBatchDigestArtifactMismatch,
   DEFAULT_SIGNER_BITMAP,
   type L1_BatchPublicDataV1Full,
   type Signature,
@@ -76,6 +77,7 @@ export async function getFinalizeBatchArgsFromLedger(
     };
     const batchPublicData = await buildBatchPublicData(batchDataParams);
     const digest = hashBatchPublicDataV1Full(batchPublicData);
+    warnIfBatchDigestArtifactMismatch(batchPublicData, digest);
     const signatures = buildSignatureVector(digest);
     return {
       batchPublicData,
@@ -111,6 +113,7 @@ export async function runFinalizeBatchFromLedger(
     };
     const batchPublicData = await buildBatchPublicData(batchDataParams);
     const digest = hashBatchPublicDataV1Full(batchPublicData);
+    warnIfBatchDigestArtifactMismatch(batchPublicData, digest);
     const signatures = buildSignatureVector(digest);
     const signerBitmap = DEFAULT_SIGNER_BITMAP;
     const finalizeTimestamp = 0n;

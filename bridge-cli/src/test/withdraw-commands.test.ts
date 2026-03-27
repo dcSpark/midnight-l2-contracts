@@ -20,9 +20,14 @@ const mockState = vi.hoisted(() => ({
     batchIndex: 5n,
   })),
   hashBatchPublicDataV1Full: vi.fn(() => new Uint8Array(32)),
-  buildSignatureVector: vi.fn(() => [{}, {}, {}]),
+  buildSignatureVectorViaContractArtifact: vi.fn(() => [{}, {}, {}]),
   waitForBatchIndexUpdate: vi.fn(async () => ({ contractState: { data: {} }, ledger: {} })),
   deriveDefaultVerifierSet: vi.fn(() => [{ x: 1n, y: 2n }]),
+  getVerifierSetFromEnvOrDefault: vi.fn(() => [
+    { x: 0n, y: 1n },
+    { x: 0n, y: 1n },
+    { x: 0n, y: 1n },
+  ]),
   bridgeLedgerValues: [] as bigint[],
   queryStateValues: [] as bigint[],
 }));
@@ -45,9 +50,13 @@ vi.mock('../batch-helpers.js', () => ({
   ensurePendingBatch: mockState.ensurePendingBatch,
   buildBatchPublicData: mockState.buildBatchPublicData,
   hashBatchPublicDataV1Full: mockState.hashBatchPublicDataV1Full,
-  buildSignatureVector: mockState.buildSignatureVector,
+  warnIfBatchDigestArtifactMismatch: vi.fn(),
+  warnIfSignatureVectorArtifactMismatch: vi.fn(),
+  buildSignatureVectorViaContractArtifact: mockState.buildSignatureVectorViaContractArtifact,
   waitForBatchIndexUpdate: mockState.waitForBatchIndexUpdate,
+  waitForVerifierSetOnChain: vi.fn(async () => undefined),
   deriveDefaultVerifierSet: mockState.deriveDefaultVerifierSet,
+  getVerifierSetFromEnvOrDefault: mockState.getVerifierSetFromEnvOrDefault,
   DEFAULT_SIGNER_BITMAP: 7n,
 }));
 
@@ -73,7 +82,7 @@ vi.mock('bridge-contract/browser', () => ({
   witnesses: {},
 }));
 
-vi.mock('@midnight-ntwrk/ledger-v7', () => ({
+vi.mock('@midnight-ntwrk/ledger-v8', () => ({
   unshieldedToken: () => ({ raw: 'night' }),
 }));
 
@@ -81,7 +90,7 @@ vi.mock('@midnight-ntwrk/compact-runtime', () => ({
   encodeCoinPublicKey: vi.fn(() => new Uint8Array(32).fill(1)),
 }));
 
-vi.mock('@midnight-ntwrk/onchain-runtime-v2', () => ({
+vi.mock('@midnight-ntwrk/onchain-runtime-v3', () => ({
   encodeUserAddress: vi.fn(() => new Uint8Array(32).fill(2)),
   sampleUserAddress: vi.fn(() => ({ tag: 'user' })),
 }));

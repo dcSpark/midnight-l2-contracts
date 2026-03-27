@@ -4,10 +4,15 @@
  */
 import { type ContractState } from '@midnight-ntwrk/compact-runtime';
 import { createHash, randomBytes } from 'node:crypto';
-import { Bridge, type BridgePrivateState } from 'bridge-contract/browser';
+import {
+  Bridge,
+  type BridgePrivateState,
+  witnesses,
+} from 'bridge-contract/browser';
 import type { DeployedBridgeContract } from './common-types.js';
 import {
   signBytes32 as ledgerSignBytes32,
+  verifyBytes32 as ledgerVerifyBytes32,
   derivePk as ledgerDerivePk,
   hashBatchPublicDataV1FullLedger,
   type Signature as LedgerSignature,
@@ -78,6 +83,51 @@ export async function readCommittedBatch(
     return ledger.L1_lastFinalizedBatchHash;
   }
   throw new Error(`Committed batch not found for index ${index}`);
+}
+
+export function verifierPointsEqual(
+  a: { x: bigint; y: bigint },
+  b: { x: bigint; y: bigint },
+): boolean {
+  return a.x === b.x && a.y === b.y;
+}
+
+/**
+ * Poll until `L1_verifierSet` matches `expected` (e.g. after setVerifierSet).
+ * Signing uses {@link getVerifierSecretKeysFromEnvOrDefault}; on-chain set must match.
+ */
+export async function waitForVerifierSetOnChain(
+  publicDataProvider: PublicDataProvider,
+  contractAddress: string,
+  expected: { x: bigint; y: bigint }[],
+  options?: { attempts?: number; delayMs?: number },
+): Promise<void> {
+  const attempts = options?.attempts ?? 30;
+  const delayMs = options?.delayMs ?? 2_000;
+  if (expected.length !== 3) {
+    throw new Error('waitForVerifierSetOnChain: expected exactly 3 verifier points');
+  }
+  const [e0, e1, e2] = expected;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const contractState = await publicDataProvider.queryContractState(contractAddress);
+    if (contractState) {
+      const ledger = Bridge.ledger(contractState.data);
+      const vs = ledger.L1_verifierSet;
+      if (
+        vs.length === 3 &&
+        verifierPointsEqual(vs[0]!, e0!) &&
+        verifierPointsEqual(vs[1]!, e1!) &&
+        verifierPointsEqual(vs[2]!, e2!)
+      ) {
+        return;
+      }
+    }
+    await delay(delayMs);
+  }
+  throw new Error(
+    'Timed out waiting for on-chain verifier set to match signing keys. ' +
+      'Use the same VERIFIER_SECRET_KEYS (or defaults) for setVerifierSet and finalizeBatch signing.',
+  );
 }
 
 export async function waitForBatchIndexUpdate(
@@ -231,6 +281,114 @@ export function buildSignatureVector(
   );
 }
 
+/** Inclusive upper bound for nonce grinding in {@link buildSignatureVectorViaContractArtifact}. */
+const CONTRACT_ARTIFACT_SIGNATURE_GRIND_MAX_NONCE = 1000n;
+
+function signOneVerifierWithPureCircuitsNonceGrind(
+  digest: Uint8Array,
+  sk: bigint,
+  signerIndex: number,
+): Signature {
+  for (let nonce = 1n; nonce <= CONTRACT_ARTIFACT_SIGNATURE_GRIND_MAX_NONCE; nonce += 1n) {
+    let sig: Signature;
+    try {
+      sig = Bridge.pureCircuits.signBytes32(digest, sk, nonce);
+    } catch {
+      continue;
+    }
+    try {
+      if (Bridge.pureCircuits.verifyBytes32(digest, sig)) {
+        return sig;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(
+    `buildSignatureVectorViaContractArtifact: signer index ${signerIndex}: no nonce in 1..${CONTRACT_ARTIFACT_SIGNATURE_GRIND_MAX_NONCE} yields verifyBytes32=true`,
+  );
+}
+
+/**
+ * For each verifier key, `pureCircuits.signBytes32` with nonces 1..1000 until
+ * `pureCircuits.verifyBytes32` succeeds (nonce grinding). Throws if none found for any signer.
+ * {@link buildSignatureVector} is unchanged; this path is for artifact-aligned probing only.
+ */
+export function buildSignatureVectorViaContractArtifact(
+  digest: Uint8Array,
+  _signatureNonce?: bigint,
+): Signature[] {
+  const keys = getVerifierSecretKeysFromEnvOrDefault();
+  return keys.map((sk, signerIndex) =>
+    signOneVerifierWithPureCircuitsNonceGrind(digest, sk, signerIndex),
+  );
+}
+
+function signatureStructEqual(a: Signature, b: Signature): boolean {
+  return (
+    verifierPointsEqual(a.pk, b.pk) &&
+    verifierPointsEqual(a.r, b.r) &&
+    a.s === b.s
+  );
+}
+
+/**
+ * Compare offchain {@link buildSignatureVector} vs {@link buildSignatureVectorViaContractArtifact}
+ * (artifact path uses per-signer nonce grinding 1..1000 until verify succeeds).
+ * Offchain sigs use {@link ledgerVerifyBytes32}; artifact sigs use `pureCircuits.verifyBytes32`.
+ * Do not pass ledger-produced signatures into `pureCircuits.verifyBytes32` — point encoding can throw.
+ */
+export function warnIfSignatureVectorArtifactMismatch(
+  digest: Uint8Array,
+  offchainSignatures: Signature[],
+): void {
+  let artifactSignatures: Signature[];
+  try {
+    artifactSignatures = buildSignatureVectorViaContractArtifact(digest);
+  } catch (e) {
+    console.warn(
+      'signature vector: contract artifact signing failed:',
+      e instanceof Error ? e.message : e,
+    );
+    return;
+  }
+  if (artifactSignatures.length !== offchainSignatures.length) {
+    console.warn(
+      `signature vector length mismatch: artifact=${artifactSignatures.length} offchain=${offchainSignatures.length}`,
+    );
+    return;
+  }
+  let allStructMatch = true;
+  for (let i = 0; i < artifactSignatures.length; i += 1) {
+    const off = offchainSignatures[i];
+    const art = artifactSignatures[i];
+    const verifyOff = ledgerVerifyBytes32(digest, off);
+    let verifyArt = false;
+    try {
+      verifyArt = Bridge.pureCircuits.verifyBytes32(digest, art);
+    } catch (e) {
+      console.warn(
+        `[signature] index ${i} pureCircuits.verifyBytes32(artifact) threw:`,
+        e instanceof Error ? e.message : e,
+      );
+      allStructMatch = false;
+      continue;
+    }
+    const structMatch = signatureStructEqual(off, art);
+    if (!structMatch) {
+      allStructMatch = false;
+      console.warn(
+        `[signature] index ${i} offchain vs pureCircuits: structMatch=false verifyOffchain(ledger)=${verifyOff} verifyArtifact(pure)=${verifyArt} offchain.s=${off.s.toString()} artifact.s=${art.s.toString()}`,
+      );
+    }
+  }
+  if (allStructMatch) {
+    console.error(
+      '[signature] offchain signatures match pureCircuits.signBytes32 (ledger + pure verifyBytes32 true for all)',
+    );
+  }
+}
+
 function strictPadBytes32(value: string): Uint8Array {
   const bytes = Buffer.from(value, 'utf8');
   if (bytes.length > 32) {
@@ -304,6 +462,55 @@ export function hashBatchPublicDataV1Full(b: L1_BatchPublicDataV1Full): Uint8Arr
     ensureBytes32Length(b.withdrawRoot, 'withdrawRoot'),
   ];
   return hashBatchPublicDataV1FullLedger(chunks);
+}
+
+type ContractWithBatchHash = {
+  _hashBatchPublicDataV1Full_0(b: L1_BatchPublicDataV1Full): Uint8Array;
+};
+
+function bytesEqual32(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== 32 || b.length !== 32) return false;
+  for (let i = 0; i < 32; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Batch digest from compiled Bridge contract JS (same path as on-chain finalizeBatch).
+ * Exposed as Contract._hashBatchPublicDataV1Full_0; not on pureCircuits.
+ */
+export function hashBatchPublicDataV1FullViaContractArtifact(
+  b: L1_BatchPublicDataV1Full,
+): Uint8Array {
+  const contract = new Bridge.Contract<BridgePrivateState>(witnesses);
+  return (contract as unknown as ContractWithBatchHash)._hashBatchPublicDataV1Full_0(
+    b,
+  );
+}
+
+/** Compare offchain digest to contract artifact; log console.warn if they differ. */
+export function warnIfBatchDigestArtifactMismatch(
+  batchPublicData: L1_BatchPublicDataV1Full,
+  offchainDigest: Uint8Array,
+): void {
+  let artifactDigest: Uint8Array;
+  try {
+    artifactDigest = hashBatchPublicDataV1FullViaContractArtifact(batchPublicData);
+  } catch (e) {
+    console.warn(
+      'batch digest: contract artifact hash failed:',
+      e instanceof Error ? e.message : e,
+    );
+    return;
+  }
+  if (bytesEqual32(offchainDigest, artifactDigest)) {
+    console.error('[batch-digest] offchain digest matches contract artifact');
+  } else {
+    console.warn(
+      `batch digest mismatch: offchain=${bytes32ToHex(offchainDigest)} artifact=${bytes32ToHex(artifactDigest)}`,
+    );
+  }
 }
 
 export function deriveDefaultVerifierSet(): Signature['pk'][] {

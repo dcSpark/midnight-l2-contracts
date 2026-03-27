@@ -4,7 +4,7 @@
 // L2 modules for local simulation (withdraw message + merkle root building) commented
 // out as making the contract too large.
 
-pragma language_version >= 0.20;
+pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 import Signer;
@@ -89,7 +89,7 @@ export circuit initialize(
   rollupId_: Bytes<32>,
   genesisStateRoot_: Bytes<32>,
   genesisBatchHash_: Bytes<32>,
-  verifierSet_: Vector<3, NativePoint>,
+  verifierSet_: Vector<3, JubjubPoint>,
   signatureThreshold_: Uint<8>,
   initialSequencer_: Bytes<32>,
   initialFinalizer_: Bytes<32>
@@ -281,7 +281,7 @@ export circuit addSequencer(seq_: Bytes<32>): [] { L1_addSequencer(disclose(seq_
 export circuit removeSequencer(seq_: Bytes<32>): [] { L1_removeSequencer(disclose(seq_)); }
 export circuit addFinalizer(f_: Bytes<32>): [] { L1_addFinalizer(disclose(f_)); }
 export circuit removeFinalizer(f_: Bytes<32>): [] { L1_removeFinalizer(disclose(f_)); }
-export circuit setVerifierSet(newSet_: Vector<3, NativePoint>): [] { L1_setVerifierSet(disclose(newSet_)); }
+export circuit setVerifierSet(newSet_: Vector<3, JubjubPoint>): [] { L1_setVerifierSet(disclose(newSet_)); }
 
 // L1 queries
 // Pool helpers (needed to pick a coin id off-chain)

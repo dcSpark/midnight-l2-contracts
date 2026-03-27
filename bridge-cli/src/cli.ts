@@ -23,6 +23,7 @@ import {
   parseBatchPublicDataFromJson,
   parseSignaturesFromJson,
 } from './batch-helpers.js';
+import { formatErrorChain } from './error-format.js';
 
 // Required for Midnight indexer/sdk in Node
 globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
@@ -404,7 +405,7 @@ const isCliEntry =
   (process.argv[1].endsWith('cli.js') || process.argv[1].endsWith('cli.ts'));
 if (isCliEntry) {
   void main().catch((err: unknown) => {
-    console.error(err instanceof Error ? err.message : err);
+    console.error(formatErrorChain(err));
     process.exitCode = 1;
   });
 }

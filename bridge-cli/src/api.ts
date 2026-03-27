@@ -21,9 +21,9 @@ import {
   sampleSigningKey,
   type ContractAddress,
 } from '@midnight-ntwrk/compact-runtime';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 
-import { CompiledContract, getImpureCircuitIds } from '@midnight-ntwrk/compact-js';
+import { CompiledContract, getProvableCircuitIds } from '@midnight-ntwrk/compact-js';
 import {
   createCircuitCallTxInterface,
   createCircuitMaintenanceTxInterfaces,
@@ -48,7 +48,12 @@ import {
 import { assertIsContractAddress, parseCoinPublicKeyToHex } from '@midnight-ntwrk/midnight-js-utils';
 
 import { DustWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
-import { WalletFacade, type FacadeState, type UtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-facade';
+import {
+  WalletFacade,
+  type DefaultConfiguration,
+  type FacadeState,
+  type UtxoWithMeta,
+} from '@midnight-ntwrk/wallet-sdk-facade';
 import { HDWallet, Roles } from '@midnight-ntwrk/wallet-sdk-hd';
 import { ShieldedWallet } from '@midnight-ntwrk/wallet-sdk-shielded';
 import {
@@ -469,7 +474,7 @@ export const deploy = async (
     throw new Error('ZK config provider is not available');
   }
 
-  const verifierKeys = await providers.zkConfigProvider.getVerifierKeys(getImpureCircuitIds(bridgeContractInstance));
+  const verifierKeys = await providers.zkConfigProvider.getVerifierKeys(getProvableCircuitIds(bridgeContractInstance));
   if (verifierKeys.length === 0) {
     throw new Error('No verifier keys found for bridge circuits. Check zkConfigPath and artifacts.');
   }
@@ -498,6 +503,7 @@ export const deploy = async (
     throw new DeployTxFailedError(finalizedTxData);
   }
 
+  providers.privateStateProvider.setContractAddress(unprovenDeployTxData.public.contractAddress);
   await providers.privateStateProvider.set(BridgePrivateStateId, unprovenDeployTxData.private.initialPrivateState);
   await providers.privateStateProvider.setSigningKey(unprovenDeployTxData.public.contractAddress, signingKey);
 
@@ -671,7 +677,7 @@ export const displayWalletBalances = async (
  */
 export const registerNightForDust = async (walletContext: WalletContext): Promise<boolean> => {
   const state = await Rx.firstValueFrom(walletContext.wallet.state().pipe(Rx.filter((s) => s.isSynced)));
-  const dustBalance = state.dust?.walletBalance(new Date()) ?? 0n;
+  const dustBalance = state.dust?.balance(new Date()) ?? 0n;
 
   // Check if we have unshielded coins that are not registered for dust generation
   const unregisteredNightUtxos =
@@ -735,10 +741,10 @@ export const registerNightForDust = async (walletContext: WalletContext): Promis
       walletContext.wallet.state().pipe(
         Rx.throttleTime(5_000),
         Rx.tap((s) => {
-          const dustBalance = s.dust?.walletBalance(new Date()) ?? 0n;
+          const dustBalance = s.dust?.balance(new Date()) ?? 0n;
           logger.info(`Dust balance: ${dustBalance}`);
         }),
-        Rx.filter((s) => (s.dust?.walletBalance(new Date()) ?? 0n) > 0n),
+        Rx.filter((s) => (s.dust?.balance(new Date()) ?? 0n) > 0n),
       ),
     );
 
@@ -789,7 +795,7 @@ const waitForDustBalance = async (
   await Rx.firstValueFrom(
     walletContext.wallet.state().pipe(
       Rx.filter((state) => state.isSynced),
-      Rx.map((state) => state.dust?.walletBalance(new Date()) ?? 0n),
+      Rx.map((state) => state.dust?.balance(new Date()) ?? 0n),
       Rx.filter((balance) => balance >= minBalance),
       Rx.timeout({ first: timeoutMs }),
     ),
@@ -836,7 +842,7 @@ export const ensureSpendableUnshieldedNight = async (
   let spendableUtxos = getSpendableNightUtxos(state);
   let registeredUtxos = getRegisteredNightUtxos(state);
   let spendableBalance = sumUtxoValues(spendableUtxos);
-  let dustBalance = state.dust?.walletBalance(new Date()) ?? 0n;
+  let dustBalance = state.dust?.balance(new Date()) ?? 0n;
 
   if (dustBalance < minDustBalance) {
     if (registeredUtxos.length === 0) {
@@ -880,7 +886,7 @@ export const ensureSpendableUnshieldedNight = async (
   state = await syncedState();
   spendableUtxos = getSpendableNightUtxos(state);
   registeredUtxos = getRegisteredNightUtxos(state);
-  dustBalance = state.dust?.walletBalance(new Date()) ?? 0n;
+  dustBalance = state.dust?.balance(new Date()) ?? 0n;
 
   return {
     spendableBalance,
@@ -934,17 +940,20 @@ export const initWalletWithSeed = async (seed: Buffer, config: Config): Promise<
     indexerUrl: config.indexerWS,
   };
 
-  const shieldedWallet = ShieldedWallet(baseConfig as ShieldedConfig).startWithSecretKeys(shieldedSecretKeys);
-  const dustWallet = DustWallet(baseConfig as DustConfig).startWithSecretKey(
-    dustSecretKey,
-    ledger.LedgerParameters.initialParameters().dust,
-  );
-  const unshieldedWallet = UnshieldedWallet({
-    ...baseConfig,
-    txHistoryStorage: new InMemoryTransactionHistoryStorage(),
-  } as UnshieldedConfig).startWithPublicKey(UnshieldedPublicKey.fromKeyStore(unshieldedKeystore));
-
-  const facade: WalletFacade = new WalletFacade(shieldedWallet, unshieldedWallet, dustWallet);
+  const facade = await WalletFacade.init({
+    configuration: baseConfig as unknown as DefaultConfiguration,
+    shielded: (cfg) => ShieldedWallet(cfg as ShieldedConfig).startWithSecretKeys(shieldedSecretKeys),
+    unshielded: (cfg) =>
+      UnshieldedWallet({
+        ...(cfg as UnshieldedConfig),
+        txHistoryStorage: new InMemoryTransactionHistoryStorage(),
+      } as UnshieldedConfig).startWithPublicKey(UnshieldedPublicKey.fromKeyStore(unshieldedKeystore)),
+    dust: (cfg) =>
+      DustWallet(cfg as DustConfig).startWithSecretKey(
+        dustSecretKey,
+        ledger.LedgerParameters.initialParameters().dust,
+      ),
+  });
   await facade.start(shieldedSecretKeys, dustSecretKey);
 
   return { wallet: facade, shieldedSecretKeys, dustSecretKey, unshieldedKeystore };
@@ -1031,10 +1040,12 @@ export const configureProviders = async (walletContext: WalletContext, config: C
   const walletAndMidnightProvider = await createWalletAndMidnightProvider(walletContext);
   const zkConfigProvider = new NodeZkConfigProvider<BridgeCircuits>(contractConfig.zkConfigPath);
   const baseProofProvider = createProofProviderWithTimeout(config.proofServer, zkConfigProvider, config.proofTimeoutMs);
+  const accountId = walletContext.unshieldedKeystore.getBech32Address().asString();
   return {
     privateStateProvider: levelPrivateStateProvider<typeof BridgePrivateStateId, BridgePrivateState>({
       privateStateStoreName: contractConfig.privateStateStoreName,
-      walletProvider: walletAndMidnightProvider,
+      privateStoragePasswordProvider: contractConfig.privateStoragePasswordProvider,
+      accountId,
     }),
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),
     zkConfigProvider,

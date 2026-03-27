@@ -8,9 +8,9 @@ import {
   generateMerkleProof,
   hashL2ToL1Withdraw,
 } from 'bridge-contract';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { encodeCoinPublicKey } from '@midnight-ntwrk/compact-runtime';
-import { encodeUserAddress, sampleUserAddress } from '@midnight-ntwrk/onchain-runtime-v2';
+import { encodeUserAddress, sampleUserAddress } from '@midnight-ntwrk/onchain-runtime-v3';
 import * as Rx from 'rxjs';
 import path from 'node:path';
 import * as api from '../api.js';
@@ -21,12 +21,14 @@ import type { BridgeProviders } from '../common-types.js';
 import type { ExecutorContext } from '../executor-context.js';
 import {
   buildBatchPublicData,
-  buildSignatureVector,
+  buildSignatureVectorViaContractArtifact,
   DEFAULT_SIGNER_BITMAP,
-  deriveDefaultVerifierSet,
   ensurePendingBatch,
+  getVerifierSetFromEnvOrDefault,
   hashBatchPublicDataV1Full,
+  warnIfBatchDigestArtifactMismatch,
   waitForBatchIndexUpdate,
+  waitForVerifierSetOnChain,
 } from '../batch-helpers.js';
 
 const WITHDRAW_TREE_DEPTH = 16;
@@ -218,10 +220,16 @@ export async function runTestWithdraw(
 
     let setVerifierSetTxHash: string | null = null;
     if (!opts.skipSetVerifierSet) {
+      const verifierSetForSigning = getVerifierSetFromEnvOrDefault();
       logProgress('Sending setVerifierSet transaction...');
-      const setVerifierTx = await bridgeContract.callTx.setVerifierSet(deriveDefaultVerifierSet());
+      const setVerifierTx = await bridgeContract.callTx.setVerifierSet(verifierSetForSigning);
       setVerifierSetTxHash = setVerifierTx.public.txHash;
       logProgress(`setVerifierSet submitted: ${setVerifierSetTxHash}`);
+      logProgress('Waiting for on-chain verifier set to match VERIFIER_SECRET_KEYS (or defaults)...');
+      await waitForVerifierSetOnChain(publicDataProvider, bridgeAddress, verifierSetForSigning, {
+        attempts: waitAttempts,
+        delayMs: waitDelayMs,
+      });
     }
 
     const bridgeLedger = await api.getBridgeLedger(providers, bridgeAddress);
@@ -321,7 +329,8 @@ export async function runTestWithdraw(
       withdrawRoot,
     });
     const digest = hashBatchPublicDataV1Full(batchData);
-    const signatures = buildSignatureVector(digest);
+    warnIfBatchDigestArtifactMismatch(batchData, digest);
+    const signatures = buildSignatureVectorViaContractArtifact(digest);
     logProgress('Sending finalizeBatch transaction...');
     const finalizeTx = await bridgeContract.callTx.finalizeBatch(
       batchData,

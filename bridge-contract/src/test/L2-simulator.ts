@@ -16,7 +16,7 @@ import {
   type CircuitContext,
   createCircuitContext,
   createConstructorContext,
-  type CurvePoint,
+  type JubjubPoint,
   sampleContractAddress
 } from "@midnight-ntwrk/compact-runtime";
 import {
@@ -27,15 +27,15 @@ import {
   type Signature,
   type WithdrawNIGHTResult
 } from "../managed/L2Simulation/contract/index.js";
-import { type L2PrivateState, witnesses } from "../witnesses.js";
+import { type L2PrivateState, l2SimulationWitnesses } from "../witnesses.js";
 
 export class L2Simulator {
   readonly contract: Contract<L2PrivateState>;
   circuitContext: CircuitContext<L2PrivateState>;
-  private signers: { sk: bigint; pk: CurvePoint }[];
+  private signers: { sk: bigint; pk: JubjubPoint }[];
 
   constructor() {
-    this.contract = new Contract<L2PrivateState>(witnesses);
+    this.contract = new Contract<L2PrivateState>(l2SimulationWitnesses);
 
     // Generate 3 random key pairs (deterministically for tests)
     // Use small values to ensure they're well within the field
@@ -73,7 +73,7 @@ export class L2Simulator {
     return this.circuitContext.currentPrivateState;
   }
 
-  public getPublicKey(signerIndex: number): CurvePoint {
+  public getPublicKey(signerIndex: number): JubjubPoint {
     if (signerIndex < 0 || signerIndex >= this.signers.length) {
       throw new Error("Invalid signer index");
     }

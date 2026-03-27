@@ -1,4 +1,4 @@
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { CombinedTokenTransfer } from '@midnight-ntwrk/wallet-sdk-facade';
 import * as api from '../../api';
@@ -7,6 +7,8 @@ import { tokenValue } from './utils';
 //allows to transfer unshielded tokens
 //TODO: correct error with address
 export async function sendUnshieldedToken(wallet: api.WalletContext, address: string, amount: bigint): Promise<string> {
+  const selfBech32 = wallet.unshieldedKeystore.getBech32Address();
+  const receiverAddress = UnshieldedAddress.codec.decode(selfBech32.network, selfBech32);
   const tokenTransfer: CombinedTokenTransfer[] = [
     {
       type: 'unshielded',
@@ -14,7 +16,7 @@ export async function sendUnshieldedToken(wallet: api.WalletContext, address: st
         {
           type: ledger.unshieldedToken().raw,
           amount: tokenValue(amount),
-          receiverAddress: wallet.unshieldedKeystore.getAddress(),
+          receiverAddress,
         },
       ],
     },

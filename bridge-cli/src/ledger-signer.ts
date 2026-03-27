@@ -5,20 +5,22 @@
  * Encoding spec: bridge-cli/docs/signing-encoding-spec.md
  */
 import {
-  CompactTypeNativePoint,
+  CompactTypeJubjubPoint,
   CompactTypeBytes,
   persistentHash,
   degradeToTransient,
+  addField,
+  mulField,
   ecMulGenerator,
   ecMul,
   ecAdd,
   MAX_FIELD,
-  type NativePoint,
+  type JubjubPoint,
 } from '@midnight-ntwrk/compact-runtime';
 
 const MODULUS = MAX_FIELD + 1n;
 
-/** Jubjub scalar field order; contract expects s < this. */
+/** Jubjub subgroup order; TS `ecMulGenerator` only accepts scalars in `[0, q)`. */
 const JUBJUB_SCALAR_FIELD =
   6554484396890773809930967563523245729705921265872317281365359162392183254199n;
 
@@ -27,18 +29,23 @@ function canonField(x: bigint): bigint {
   return r >= 0n ? r : r + MODULUS;
 }
 
+function modJubjubScalar(x: bigint): bigint {
+  const r = x % JUBJUB_SCALAR_FIELD;
+  return r >= 0n ? r : r + JUBJUB_SCALAR_FIELD;
+}
+
 const Bytes32 = new CompactTypeBytes(32);
 
 /** Descriptor for Challenge { r, pk, msg } used in Fiat–Shamir. */
 const ChallengeBytes32Descriptor = {
-  alignment(): ReturnType<typeof CompactTypeNativePoint.alignment> {
-    return CompactTypeNativePoint.alignment()
-      .concat(CompactTypeNativePoint.alignment())
+  alignment(): ReturnType<typeof CompactTypeJubjubPoint.alignment> {
+    return CompactTypeJubjubPoint.alignment()
+      .concat(CompactTypeJubjubPoint.alignment())
       .concat(Bytes32.alignment());
   },
-  toValue(v: { r: NativePoint; pk: NativePoint; msg: Uint8Array }) {
-    return CompactTypeNativePoint.toValue(v.r)
-      .concat(CompactTypeNativePoint.toValue(v.pk))
+  toValue(v: { r: JubjubPoint; pk: JubjubPoint; msg: Uint8Array }) {
+    return CompactTypeJubjubPoint.toValue(v.r)
+      .concat(CompactTypeJubjubPoint.toValue(v.pk))
       .concat(Bytes32.toValue(v.msg));
   },
   fromValue(_value: Uint8Array[]) {
@@ -53,8 +60,8 @@ export type Signature = {
 };
 
 export function computeChallenge(
-  r: NativePoint,
-  pk: NativePoint,
+  r: JubjubPoint,
+  pk: JubjubPoint,
   msg: Uint8Array,
 ): bigint {
   const persistent = persistentHash(ChallengeBytes32Descriptor, { r, pk, msg });
@@ -63,7 +70,8 @@ export function computeChallenge(
 
 /**
  * Sign a 32-byte message with the given secret key and nonce.
- * Computes s in the Jubjub scalar field (mod q) so any nonce works; no grinding.
+ * Matches `Signer.compact` / compiled `_sign_0`: `s = addField(nonce, mulField(c, sk))`.
+ * `pk`/`r` use `modJubjubScalar` so `ecMulGenerator` accepts `EmbeddedFr` in JS.
  */
 export function signBytes32(
   msg: Uint8Array,
@@ -73,14 +81,12 @@ export function signBytes32(
   if (msg.length !== 32) {
     throw new Error('signBytes32: msg must be 32 bytes');
   }
-  const skQ = sk % JUBJUB_SCALAR_FIELD;
-  const nonceQ = nonce === 0n ? 1n : nonce % JUBJUB_SCALAR_FIELD;
-
-  const pk = ecMulGenerator(skQ);
-  const r = ecMulGenerator(nonceQ);
+  const skF = canonField(sk);
+  const nonceF = nonce === 0n ? 1n : canonField(nonce);
+  const pk = ecMulGenerator(modJubjubScalar(skF));
+  const r = ecMulGenerator(modJubjubScalar(nonceF));
   const c = computeChallenge(r, pk, msg);
-  const cQ = c % JUBJUB_SCALAR_FIELD;
-  const s = (nonceQ + cQ * skQ) % JUBJUB_SCALAR_FIELD;
+  const s = (nonceF + canonField(c) * skF) % JUBJUB_SCALAR_FIELD;
   return { pk, r, s };
 }
 
@@ -91,18 +97,17 @@ export function verifyBytes32(msg: Uint8Array, sig: Signature): boolean {
   if (msg.length !== 32) {
     return false;
   }
-  const c = computeChallenge(sig.r, sig.pk, msg);
-  const sF = canonField(sig.s);
-  const lhs = ecMulGenerator(sF);
-  const rhs = ecAdd(sig.r, ecMul(sig.pk, c));
+  const c = canonField(computeChallenge(sig.r, sig.pk, msg));
+  const lhs = ecMulGenerator(modJubjubScalar(canonField(sig.s)));
+  const rhs = ecAdd(sig.r, ecMul(sig.pk, modJubjubScalar(c)));
   return lhs.x === rhs.x && lhs.y === rhs.y;
 }
 
 /**
  * Derive public key (curve point) from secret key.
  */
-export function derivePk(sk: bigint): NativePoint {
-  return ecMulGenerator(sk);
+export function derivePk(sk: bigint): JubjubPoint {
+  return ecMulGenerator(modJubjubScalar(canonField(sk)));
 }
 
 /** Vector<14, Bytes<32>> descriptor for batch digest. */

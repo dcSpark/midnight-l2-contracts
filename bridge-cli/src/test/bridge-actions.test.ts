@@ -1,6 +1,6 @@
 import { ContractState, encodeCoinPublicKey } from '@midnight-ntwrk/compact-runtime';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
-import { encodeUserAddress, sampleUserAddress } from '@midnight-ntwrk/onchain-runtime-v2';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
+import { encodeUserAddress, sampleUserAddress } from '@midnight-ntwrk/onchain-runtime-v3';
 import { Buffer } from 'buffer';
 import { computeMerkleRoot, computeWithdrawLeaf, generateMerkleProof, hashL2ToL1Withdraw } from 'bridge-contract';
 import { Bridge, type BridgePrivateState, witnesses } from 'bridge-contract/browser';
@@ -13,6 +13,8 @@ import * as api from '../api';
 import { type BridgeL1ToL2DepositMessage } from '../api';
 import { type BridgeProviders, type DeployedBridgeContract } from '../common-types';
 import { currentDir } from '../config';
+import { getVerifierSetFromEnvOrDefault } from '../batch-helpers.js';
+import { signBytes32 as ledgerSignBytes32, verifyBytes32 as ledgerVerifyBytes32 } from '../ledger-signer.js';
 import { createLogger } from '../logger';
 import { TestEnvironment } from './simulators/simulator';
 
@@ -36,7 +38,6 @@ const DEFAULT_VERIFIER_SECRET_KEYS = [101n, 102n, 103n] as const;
 const DEFAULT_SIGNER_BITMAP = (1n << BigInt(DEFAULT_VERIFIER_SECRET_KEYS.length)) - 1n;
 const SIGNATURE_NONCE = 0n;
 const SIGNATURE_MAX_NONCE = 256n;
-const JUBJUB_SCALAR_FIELD = 6554484396890773809930967563523245729705921265872317281365359162392183254199n;
 const WITHDRAW_TREE_DEPTH = 16;
 type PublicDataProvider = NonNullable<BridgeProviders['publicDataProvider']>;
 type Signature = Bridge.Signature;
@@ -80,7 +81,7 @@ const waitForUnshieldedBalance = async (
 const logFundingState = async (wallet: api.WalletContext) => {
   const state = await Rx.firstValueFrom(wallet.wallet.state().pipe(Rx.filter((s) => s.isSynced)));
   const unshielded = state.unshielded?.balances[ledger.unshieldedToken().raw] ?? 0n;
-  const dust = state.dust?.walletBalance(new Date()) ?? 0n;
+  const dust = state.dust?.balance(new Date()) ?? 0n;
   const nightCoins = (state.unshielded?.availableCoins ?? []).filter(
     (coin) => coin.utxo.type === ledger.unshieldedToken().raw,
   );
@@ -525,10 +526,8 @@ type EnsureBatchResult = {
   batchHash: Uint8Array;
 };
 
-const getDefaultVerifierSet = () => require('../batch-helpers.js').deriveDefaultVerifierSet();
-
 const ensureDefaultVerifierSet = async (bridgeContract: DeployedBridgeContract): Promise<void> => {
-  await bridgeContract.callTx.setVerifierSet(getDefaultVerifierSet());
+  await bridgeContract.callTx.setVerifierSet(getVerifierSetFromEnvOrDefault());
 };
 
 const getContractStateAndLedger = async (
@@ -667,21 +666,14 @@ const buildBatchPublicData = async (params: BatchDataParams): Promise<L1_BatchPu
 const buildSignatureVector = (digest: Uint8Array): Signature[] =>
   DEFAULT_VERIFIER_SECRET_KEYS.map((sk, index) => signWithNonceRetry(digest, sk, index, SIGNATURE_MAX_NONCE));
 
-const signWithNonceRetry = (digest: Uint8Array, secretKey: bigint, signerIndex: number, limit: bigint): Signature => {
-  for (let nonce = SIGNATURE_NONCE; nonce < limit; nonce += 1n) {
-    const signature = Bridge.pureCircuits.signBytes32(digest, secretKey, nonce) as Signature;
-    if (signature.s >= JUBJUB_SCALAR_FIELD) {
-      continue;
-    }
-    try {
-      if (Bridge.pureCircuits.verifyBytes32(digest, signature)) {
-        return signature;
-      }
-    } catch {
-      // The signature isn't usable; try the next nonce.
-    }
+const signWithNonceRetry = (digest: Uint8Array, secretKey: bigint, signerIndex: number, _limit: bigint): Signature => {
+  const base = SIGNATURE_NONCE === 0n ? 1n : SIGNATURE_NONCE;
+  const nonce = base + BigInt(signerIndex);
+  const signature = ledgerSignBytes32(digest, secretKey, nonce) as Signature;
+  if (!ledgerVerifyBytes32(digest, signature)) {
+    throw new Error(`Invalid signature for signer ${signerIndex}`);
   }
-  throw new Error(`Unable to produce signature for signer ${signerIndex}`);
+  return signature;
 };
 
 const strictPadBytes32Local = (value: string): Uint8Array => {

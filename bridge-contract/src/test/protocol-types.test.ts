@@ -542,14 +542,15 @@ describe('Golden Vector Verification', () => {
 // ============================================================================
 
 import { pureCircuits as bridgePureCircuits } from '../managed/Bridge/contract/index.js';
+import { pureCircuits as l2SimulationPureCircuits } from '../managed/L2Simulation/contract/index.js';
 
 describe('Cross-Language Consistency', () => {
   // These tests verify that the TypeScript implementation
   // produces identical hashes to the Compact implementation.
   
   it('should match Compact hashL2ToL1Withdraw', () => {
-    // Use the Bridge contract's pure circuit for L2→L1 withdrawal hashing
-    const compactHash = bridgePureCircuits.hashL2ToL1Withdraw(
+    // L2Simulation artifact includes the full withdraw hash (Bridge re-exports domain separators only).
+    const compactHash = l2SimulationPureCircuits.hashL2ToL1Withdraw(
       GOLDEN.withdrawMessage1.sender,
       GOLDEN.withdrawMessage1.recipient,
       GOLDEN.withdrawMessage1.amount,
@@ -564,7 +565,7 @@ describe('Cross-Language Consistency', () => {
     const withdrawHash = hashL2ToL1Withdraw(GOLDEN.withdrawMessage1);
     
     // Then compare the leaf hash computation
-    const compactLeafHash = bridgePureCircuits.hashWithdrawLeaf(withdrawHash);
+    const compactLeafHash = l2SimulationPureCircuits.hashWithdrawLeaf(withdrawHash);
     const tsLeafHash = computeWithdrawLeaf(withdrawHash);
     expect(bytesEqual(compactLeafHash, tsLeafHash)).toBe(true);
   });
