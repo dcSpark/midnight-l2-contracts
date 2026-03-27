@@ -284,6 +284,17 @@ export const resolveBridgeInitializeArgs = (
  * SDK where signRecipe hardcodes 'pre-proof', which fails for proven
  * (UnboundTransaction) intents that contain 'proof' data.
  */
+/**
+ * Sign all unshielded offers in a transaction's intents.
+ *
+ * Only intents that contain unshielded offers with inputs are deserialized,
+ * signed, and written back. Intents without offers are left untouched to
+ * avoid corrupting their data via the deserialize round-trip.
+ *
+ * The intents collection is an immutable WASM-backed Map: `.set()` returns a
+ * new collection that must be assigned back to `tx.intents` (like the wallet
+ * SDK does in TransactionOps.addSignature).
+ */
 const signTransactionIntents = (
   tx: { intents?: Map<number, { serialize: () => Uint8Array }> },
   signFn: (payload: Uint8Array) => ledger.Signature,
@@ -302,24 +313,35 @@ const signTransactionIntents = (
       intent.serialize(),
     );
 
+    const hasFallible =
+      cloned.fallibleUnshieldedOffer != null && cloned.fallibleUnshieldedOffer.inputs.length > 0;
+    const hasGuaranteed =
+      cloned.guaranteedUnshieldedOffer != null && cloned.guaranteedUnshieldedOffer.inputs.length > 0;
+
+    // Skip intents without unshielded offers — deserialize round-trip can corrupt them
+    if (!hasFallible && !hasGuaranteed) continue;
+
     const sigData = cloned.signatureData(segment);
     const signature = signFn(sigData);
 
-    if (cloned.fallibleUnshieldedOffer) {
-      const sigs = cloned.fallibleUnshieldedOffer.inputs.map(
-        (_: ledger.UtxoSpend, i: number) => cloned.fallibleUnshieldedOffer!.signatures.at(i) ?? signature,
+    if (hasFallible) {
+      const offer = cloned.fallibleUnshieldedOffer!;
+      const sigs = offer.inputs.map(
+        (_: ledger.UtxoSpend, i: number) => offer.signatures.at(i) ?? signature,
       );
-      cloned.fallibleUnshieldedOffer = cloned.fallibleUnshieldedOffer.addSignatures(sigs);
+      cloned.fallibleUnshieldedOffer = offer.addSignatures(sigs);
     }
 
-    if (cloned.guaranteedUnshieldedOffer) {
-      const sigs = cloned.guaranteedUnshieldedOffer.inputs.map(
-        (_: ledger.UtxoSpend, i: number) => cloned.guaranteedUnshieldedOffer!.signatures.at(i) ?? signature,
+    if (hasGuaranteed) {
+      const offer = cloned.guaranteedUnshieldedOffer!;
+      const sigs = offer.inputs.map(
+        (_: ledger.UtxoSpend, i: number) => offer.signatures.at(i) ?? signature,
       );
-      cloned.guaranteedUnshieldedOffer = cloned.guaranteedUnshieldedOffer.addSignatures(sigs);
+      cloned.guaranteedUnshieldedOffer = offer.addSignatures(sigs);
     }
 
-    (tx.intents as Map<number, unknown>).set(segment, cloned);
+    // Immutable WASM map: .set() returns a new collection — must reassign
+    tx.intents = tx.intents.set(segment, cloned) as Map<number, { serialize: () => Uint8Array }>;
   }
 };
 

@@ -349,9 +349,7 @@ module L1Rollup {
     //assertTimestampNotFuture(ts);
     //assert(amount > (0 as Uint<128>), "ZERO_AMOUNT");
 
-    // TODO: there is a bug with receiveUnshielded currently
-    // we eventually need to uncomment this to receive the token
-    //receiveUnshielded(nativeToken(), amount);
+    receiveUnshielded(nativeToken(), amount);
 
     const queueIndex = nextCrossDomainMessageIndex;
     lockedNIGHT = ((lockedNIGHT + amount) as Uint<128>);
@@ -495,8 +493,7 @@ module L1Rollup {
     }
 
     const user = UserAddress { bytes: recipient };
-    // TODO: uncomment on ledger-v8 where this is hopefully fixed again
-    // sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
+    sendUnshielded(nativeToken(), amount, right<ContractAddress, UserAddress>(user));
   }
 
   // Claim fees (sequencer or owner). Partial spends supported, change reinserted.
