@@ -631,6 +631,47 @@ export const createWalletAndMidnightProvider = async (
   };
 };
 
+/**
+ * Check that the Midnight node WS endpoint is reachable before attempting wallet
+ * sync.  Converts the WS URL to HTTP and does a quick fetch with a short timeout
+ * so startup fails fast (< 3 s) instead of hanging for 60 s on the sync wait.
+ */
+export const checkNodeReachable = async (wsUrl: string, timeoutMs = 3000): Promise<void> => {
+  let httpUrl: string;
+  try {
+    const u = new URL(wsUrl);
+    u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
+    httpUrl = u.toString();
+  } catch {
+    // Unparseable URL — let wallet sync surface its own error.
+    return;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(httpUrl, { signal: controller.signal });
+    // Any HTTP response (even 4xx/5xx) means the host is up.
+  } catch (err: unknown) {
+    const isAbort =
+      err instanceof Error && (err.name === 'AbortError' || err.message.toLowerCase().includes('abort'));
+    const isNetwork =
+      err instanceof Error &&
+      (err.message.toLowerCase().includes('econnrefused') ||
+        err.message.toLowerCase().includes('failed to fetch') ||
+        err.message.toLowerCase().includes('fetch failed'));
+    if (isAbort || isNetwork) {
+      throw new Error(
+        `Midnight node at ${wsUrl} is not reachable. ` +
+          `Is the local network running? (cd midnight-l2-contracts && npm run setup-standalone)`,
+      );
+    }
+    // Other errors (e.g. TLS, redirect) mean the host responded — proceed.
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /** Default timeout for wallet sync (e.g. node unreachable). */
 const WALLET_SYNC_TIMEOUT_MS = 60_000;
 
@@ -987,6 +1028,9 @@ export const initWalletWithSeed = async (seed: Buffer, config: Config): Promise<
 export const buildWalletAndWaitForFunds = async (config: Config, mnemonic: string): Promise<WalletContext> => {
   logger.info(`Building wallet from mnemonic... ${mnemonic}`);
 
+  // Check node reachability before opening the WebSocket connection.
+  await checkNodeReachable(config.node);
+
   const seed = await mnemonicToSeed(mnemonic);
   const walletContext = await initWalletWithSeed(seed, config);
 
@@ -1025,6 +1069,10 @@ export const buildFreshWallet = async (config: Config): Promise<WalletContext> =
  */
 export const buildWalletFromHexSeed = async (config: Config, hexSeed: string): Promise<WalletContext> => {
   logger.info('Building wallet from hex seed...');
+
+  // Check node reachability before opening the WebSocket connection.
+  await checkNodeReachable(config.node);
+
   const seed = Buffer.from(hexSeed, 'hex');
   const walletContext = await initWalletWithSeed(seed, config);
 

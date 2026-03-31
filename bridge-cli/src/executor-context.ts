@@ -22,6 +22,7 @@ export async function buildExecutorContext(cliConfig: CliConfig): Promise<Execut
   const walletSeed = getWalletSeedFromEnv();
   const isHex =
     /^[0-9a-fA-F]{64}$/.test(walletSeed) || /^0x[0-9a-fA-F]+$/.test(walletSeed);
+  await api.checkNodeReachable(config.node);
   const walletContext = isHex
     ? await api.buildWalletFromHexSeed(config, walletSeed.replace(/^0x/, ''))
     : await api.buildWalletAndWaitForFunds(config, walletSeed);
