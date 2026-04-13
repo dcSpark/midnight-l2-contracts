@@ -60,7 +60,6 @@ jspm_packages/
 # Compact
 managed/
 .turbo
-frontend-vite-react/public
 
 .cache
 

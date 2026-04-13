@@ -50,6 +50,7 @@ export interface StateResult {
   lastFinalizedBatchIndex: string;
   lastFinalizedBatchHash: string | null;
   lastFinalizedStateRoot: string | null;
+  withdrawRoot: string | null;
   rollingHashAtLatestIndex: string | null;
   deposits: Record<string, ReturnType<typeof formatDeposit>>;
 }
@@ -75,6 +76,9 @@ export async function runState(
   const lastCommittedBatchHash = ledger.L1_lastCommittedBatchHash;
   const lastFinalizedBatchHash = ledger.L1_lastFinalizedBatchHash;
   const lastFinalizedStateRoot = ledger.L1_lastFinalizedStateRoot;
+  const withdrawRoot = ledger.L1_withdrawRoots.member(lastFinalizedBatchIndex)
+    ? ledger.L1_withdrawRoots.lookup(lastFinalizedBatchIndex)
+    : null;
 
   let rollingHashAtNextIndex: Uint8Array | undefined;
   const rollingHashIndex = nextIndex > 0n ? nextIndex - 1n : 0n;
@@ -100,6 +104,7 @@ export async function runState(
     lastFinalizedBatchIndex: lastFinalizedBatchIndex.toString(),
     lastFinalizedBatchHash: lastFinalizedBatchHash ? toHex(lastFinalizedBatchHash) : null,
     lastFinalizedStateRoot: lastFinalizedStateRoot ? toHex(lastFinalizedStateRoot) : null,
+    withdrawRoot: withdrawRoot ? toHex(withdrawRoot) : null,
     rollingHashAtLatestIndex: rollingHashAtNextIndex
       ? toHex(rollingHashAtNextIndex)
       : null,
@@ -136,6 +141,7 @@ export async function runState(
     'hash',
     lastFinalizedBatchHash ? toHex(lastFinalizedBatchHash) : '(none)',
   );
+  console.log('Withdraw root:', withdrawRoot ? toHex(withdrawRoot) : '(none)');
   console.log('---');
   console.log('L1 -> L2 deposits (0 → nextIndex-1):');
   const total = Object.keys(deposits).length;

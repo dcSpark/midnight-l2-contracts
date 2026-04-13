@@ -1,6 +1,6 @@
-# 🚀 MESH - EDDA - Midnight Starter Template
-- A starter template for building on Midnight Network with React frontend and smart contract integration.
-- **[Live Demo → counter.nebula.builders](https://counter.nebula.builders)**
+# Midnight rollup Bridge contract
+
+This repository contains the on-chain bridge contract and supporting tooling for the Midnight L2 rollup. The bridge contract, written in [Compact](https://docs.midnight.network/relnotes/compact-tools), is deployed on the Midnight L1 and enables bidirectional asset transfers between L1 and the Sovereign SDK rollup (L2). Key capabilities include unshielded NIGHT deposits (L1→L2), proof-based withdrawal claims (L2→L1), batch commitment and finalization with threshold signatures, and verifier set / sequencer / finalizer management. The project ships as a Turbo monorepo with two packages: the Compact smart contract (`bridge-contract`) and a TypeScript CLI and executor service (`bridge-cli`) used by the rollup node to submit L1 transactions.
 
 ## 📦 Prerequisites
 
@@ -30,12 +30,8 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 ```
 ```bash
 # Install the latest compiler
-# Compact compiler version 0.27 should be downloaded manually. Compact tools does not support it currently. 
-compact update +0.27.0
+compact update +0.30.0
 ```
-
-Compact 0.27.0+ should be manually downloaded a pasted in the compact versions folder. IE for Macos the folder is:
-`~/.compact/versions/0.27.0`
 
 ### 3️⃣ Install Node.js and docker
 - [Node.js](https://nodejs.org/) & [npm](https://www.npmjs.com/)
@@ -55,8 +51,7 @@ compact check  # Should show latest version
 
 ```
 ├── bridge-cli/         # CLI tools
-├── bridge-contract/    # Smart contracts
-└── frontend-vite-react/ # React application
+└── bridge-contract/    # Smart contracts
 ```
 
 ## 🔗 Setup Instructions
@@ -86,22 +81,10 @@ git submodule update --init
 1. **Create .env file from template under bridge-cli folder**
    - [`bridge-cli/.env_template`](./bridge-cli/.env_template)
 
-2. **Create .env file from template under frontend-vite-react folder**
-   - [`frontend-vite-react/.env_template`](./frontend-vite-react/.env_template)
-
-### Start Development In Preview Network or
-   ```bash   
-   # In one terminal (from project root)
-   npm run dev:frontend
-   ```
-
 ### Start Development In Undeployed Network
-   ```bash   
-   # In one terminal (from project root)
+   ```bash
+   # From project root
    npm run setup-standalone
-   
-   # In another terminal (from project root)
-   npm run dev:frontend
    ```
 ---
 
